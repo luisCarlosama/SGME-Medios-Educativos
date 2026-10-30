@@ -12,7 +12,7 @@ import Visibility from '@mui/icons-material/Visibility';
 import VisibilityOff from '@mui/icons-material/VisibilityOff';
 import CloseIcon from '@mui/icons-material/Close';
 import { useNavigate } from 'react-router-dom';
-import { loginAdmin } from '../../../../services/authService';
+import { loginAdmin } from '../../../../services/authService'; 
 
 const LOGO =
   'https://www.unicesmag.edu.co/recursos/uploads/2022/04/Escudos_2-2.png';

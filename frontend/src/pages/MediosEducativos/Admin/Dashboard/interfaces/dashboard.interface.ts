@@ -1,13 +1,9 @@
-/**
- * Interfaces para Dashboard.
- * Preparadas para futuro mapeo con API / base de datos.
- */
 
 export interface DashboardStats {
   solicitudesPendientes: number;
+  solicitudesExternas: number;
+  solicitudesInternas: number;
   reservasHoy: number;
-  espaciosActivos: number;
-  eventosProximos: number;
 }
 
 export interface SolicitudReciente {
@@ -15,8 +11,10 @@ export interface SolicitudReciente {
   codigo: string;
   solicitante: string;
   espacio: string;
+  campus: string;
+  tipoSolicitud: 'Interna' | 'Externa';
   fecha: string;
-  estado: string;
+  estado: 'Pendiente' | 'Aprobada' | 'Rechazada' | 'Cancelada';
 }
 
 export interface DashboardData {
