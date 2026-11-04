@@ -9,7 +9,6 @@ import {
   Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Chip,
 } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
-import AdminLayout from '../../../../../components/layout/AdminLayout';
 import type { Ceremonia, CeremoniaFilters } from './interfaces/ceremonias.interface';
 import { getCeremonias, ESTADO_CEREMONIA_OPTIONS } from './services/ceremonias.service';
 
@@ -17,6 +16,7 @@ const estadoStyles: Record<string, { bg: string; color: string }> = {
   Programada: { bg: '#E3F2FD', color: '#1565C0' },
   'En curso': { bg: '#E6F4EA', color: '#1B7A3D' },
   Finalizada: { bg: '#F0F2F5', color: '#5A6A7A' },
+  Cancelada: { bg: '#FDECEA', color: '#B42318' },
 };
 
 export default function CeremoniasListado() {
@@ -38,7 +38,7 @@ export default function CeremoniasListado() {
   useEffect(() => { load(); }, [load]);
 
   return (
-    <AdminLayout>
+    <>
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 1, flexWrap: 'wrap', gap: 2 }}>
         <Box>
           <Typography variant="h4" sx={{ fontWeight: 700, color: '#0B1A2A', fontSize: '1.75rem', mb: 0.5 }}>
@@ -75,10 +75,10 @@ export default function CeremoniasListado() {
           onChange={(e) => setFilters({ ...filters, nombre: e.target.value })}
           sx={{ flex: 1, minWidth: 200, '& .MuiOutlinedInput-root': { borderRadius: '8px' } }}
         />
-        <TextField size="small" type="date" label="Fecha" InputLabelProps={{ shrink: true }}
+        <TextField size="small" type="date" label="Fecha" slotProps={{ inputLabel: { shrink: true } }}
           value={filters.fecha || ''}
           onChange={(e) => setFilters({ ...filters, fecha: e.target.value })}
-          sx={{ minWidth: 150, '& .MuiOutlinedInput-root': { borderRadius: '8px' } }}
+          sx={{ width: 180, '& .MuiOutlinedInput-root': { borderRadius: '8px' } }}
         />
         <TextField select size="small" label="Estado" value={filters.estado || 'Todos'}
           onChange={(e) => setFilters({ ...filters, estado: e.target.value })}
@@ -125,10 +125,13 @@ export default function CeremoniasListado() {
                   }} />
                 </TableCell>
                 <TableCell>
-                  <Button variant="text" onClick={() => navigate(`/admin/eventos/ceremonias/${c.id}`)}
+                  <Button
+                    variant="text"
+                    disabled={c.estado === 'Finalizada'}
+                    onClick={() => navigate(`/admin/eventos/ceremonias/${c.id}`)}
                     sx={{ color: '#1565C0', textTransform: 'none', fontWeight: 500, fontSize: '0.875rem', p: 0, minWidth: 'auto',
                       '&:hover': { backgroundColor: 'transparent', textDecoration: 'underline' } }}>
-                    Ver detalle
+                    {c.estado === 'Finalizada' ? 'No disponible' : 'Ver detalle'}
                   </Button>
                 </TableCell>
               </TableRow>
@@ -136,9 +139,6 @@ export default function CeremoniasListado() {
           </TableBody>
         </Table>
       </TableContainer>
-      <Typography sx={{ color: '#5A6A7A', fontSize: '0.85rem', mt: 2 }}>
-        Datos de ejemplo para representar una ceremonia general con varias sesiones.
-      </Typography>
-    </AdminLayout>
+    </>
   );
 }

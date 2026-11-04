@@ -98,7 +98,7 @@ export default function AdminLayout({ children }: AdminLayoutProps) {
   const mainItems = [
     {
       label: 'Ceremonias',
-      path: '/admin/ceremonias',
+      path: '/admin/eventos/ceremonias',
       icon: <CelebrationOutlinedIcon />,
     },
     {
@@ -252,7 +252,9 @@ export default function AdminLayout({ children }: AdminLayoutProps) {
 
           {/* Resto de items */}
           {mainItems.map((item) => {
-            const active = location.pathname === item.path;
+            const active =
+              location.pathname === item.path ||
+              location.pathname.startsWith(`${item.path}/`);
 
             return (
               <ListItemButton

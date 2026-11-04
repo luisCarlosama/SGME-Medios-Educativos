@@ -1,10 +1,10 @@
 /**
  * Pantalla: Detalle de ceremonia — Resumen
- * Incluye modal Agregar sesión.
+ *  modal Agregar sesión.
  */
 
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { Navigate, useParams, useNavigate } from 'react-router-dom';
 import {
   Box, Typography, Button, Card, CardContent, Chip, Dialog, DialogTitle,
   DialogContent, DialogActions, TextField, MenuItem, IconButton, CircularProgress,
@@ -12,32 +12,42 @@ import {
 import CloseIcon from '@mui/icons-material/Close';
 import AddIcon from '@mui/icons-material/Add';
 import CloudUploadIcon from '@mui/icons-material/CloudUpload';
-import AdminLayout from '../../../../../components/layout/AdminLayout';
 import type { Ceremonia, Sesion } from './interfaces/ceremonias.interface';
 import {
-  getCeremoniaById, getSesiones, addSesion, HORA_OPTIONS,
+  cambiarEstadoCeremonia, getCeremoniaById, getFotografiasCeremonia,
+  updateMaxInvitadosPorGraduando,
+  getSesiones, addSesion, guardarFotografiasCeremonia, HORA_OPTIONS,
 } from './services/ceremonias.service';
 
-/** Imagen en el registro fotográfico (URL local o placeholder) */
 interface FotoItem {
   id: string;
   url: string;
   name?: string;
+  file?: File;
 }
 
-const FOTOS_INICIALES: FotoItem[] = [
-  { id: 'p1', url: 'gradient:1' },
-  { id: 'p2', url: 'gradient:2' },
-  { id: 'p3', url: 'gradient:3' },
-];
-
-const GRADIENTS: Record<string, string> = {
-  'gradient:1': 'linear-gradient(135deg,#1a3a5c,#4a6fa5)',
-  'gradient:2': 'linear-gradient(135deg,#2c3e50,#7f8c8d)',
-  'gradient:3': 'linear-gradient(135deg,#1e3a5f,#5d8aa8)',
-};
-
 const ACCEPT_IMAGES = 'image/png,image/jpeg,image/jpg,image/webp,image/gif';
+const MAX_FOTO_BYTES = 3 * 1024 * 1024;
+
+function convertirArchivoABase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(reader.error ?? new Error('No fue posible leer la fotografía.'));
+    reader.onload = () => {
+      if (typeof reader.result !== 'string') {
+        reject(new Error('No fue posible leer la fotografía.'));
+        return;
+      }
+      const separator = reader.result.indexOf(',');
+      if (separator < 0) {
+        reject(new Error('No fue posible preparar la fotografía.'));
+        return;
+      }
+      resolve(reader.result.slice(separator + 1));
+    };
+    reader.readAsDataURL(file);
+  });
+}
 
 export default function DetalleCeremonia() {
   const { id } = useParams<{ id: string }>();
@@ -51,13 +61,32 @@ export default function DetalleCeremonia() {
   const [horaInicio, setHoraInicio] = useState('');
   const [horaFin, setHoraFin] = useState('');
   const [saving, setSaving] = useState(false);
+  const [sesionError, setSesionError] = useState('');
+  const [maxInvitadosPorGraduando, setMaxInvitadosPorGraduando] = useState(2);
+  const [savingConfiguracionInvitados, setSavingConfiguracionInvitados] = useState(false);
+  const [configuracionInvitadosError, setConfiguracionInvitadosError] = useState('');
+  const [configuracionInvitadosSuccess, setConfiguracionInvitadosSuccess] = useState('');
+  const [savingEstadoCeremonia, setSavingEstadoCeremonia] = useState(false);
+  const [estadoCeremoniaError, setEstadoCeremoniaError] = useState('');
 
   /* Registro fotográfico */
-  const [fotos, setFotos] = useState<FotoItem[]>(FOTOS_INICIALES);
+  const [fotosCeremonia, setFotosCeremonia] = useState<{
+    id: string;
+    items: FotoItem[];
+  } | null>(null);
+  const [fotosCargadasId, setFotosCargadasId] = useState<string | null>(null);
+  const [fotoErrorActual, setFotoErrorActual] = useState<{ id: string; mensaje: string } | null>(null);
+  const [savingFotos, setSavingFotos] = useState(false);
   const [uploadOpen, setUploadOpen] = useState(false);
   const [pendingFotos, setPendingFotos] = useState<FotoItem[]>([]);
   const [dragOver, setDragOver] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const fotos = fotosCeremonia && fotosCeremonia.id === id ? fotosCeremonia.items : [];
+  const fotosCargadas = fotosCargadasId === id;
+  const fotoError = fotoErrorActual && fotoErrorActual.id === id ? fotoErrorActual.mensaje : '';
+  const setFotoError = (mensaje: string) => {
+    if (id) setFotoErrorActual({ id, mensaje });
+  };
 
   const load = useCallback(async () => {
     if (!id) return;
@@ -66,6 +95,9 @@ export default function DetalleCeremonia() {
       const [c, s] = await Promise.all([getCeremoniaById(id), getSesiones(id)]);
       setCeremonia(c);
       setSesiones(s);
+      if (c) {
+        setMaxInvitadosPorGraduando(c.maxInvitadosPorGraduando ?? 2);
+      }
     } finally {
       setLoading(false);
     }
@@ -73,21 +105,110 @@ export default function DetalleCeremonia() {
 
   useEffect(() => { load(); }, [load]);
 
+  const handleAvanzarEstadoCeremonia = async () => {
+    if (!id || !ceremonia || savingEstadoCeremonia) return;
+    const siguienteEstado = ceremonia.estado === 'Programada'
+      ? 'En curso'
+      : ceremonia.estado === 'En curso'
+        ? 'Finalizada'
+        : null;
+    if (!siguienteEstado) return;
+
+    setSavingEstadoCeremonia(true);
+    setEstadoCeremoniaError('');
+    try {
+      const resultado = await cambiarEstadoCeremonia(id, siguienteEstado);
+      setCeremonia((actual) => actual ? { ...actual, estado: resultado.estado } : actual);
+      if (resultado.estado === 'Finalizada') {
+        setSesiones((actuales) => actuales.map((sesion) => ({
+          ...sesion,
+          estado: 'Finalizada',
+        })));
+      }
+    } catch (cause) {
+      setEstadoCeremoniaError(
+        cause instanceof Error ? cause.message : 'No fue posible cambiar el estado de la ceremonia.'
+      );
+    } finally {
+      setSavingEstadoCeremonia(false);
+    }
+  };
+
+  const handleGuardarLimiteInvitados = async () => {
+    if (!id || savingConfiguracionInvitados) return;
+    setSavingConfiguracionInvitados(true);
+    setConfiguracionInvitadosError('');
+    setConfiguracionInvitadosSuccess('');
+    try {
+      const resultado = await updateMaxInvitadosPorGraduando(id, maxInvitadosPorGraduando);
+      setCeremonia((actual) => actual
+        ? {
+          ...actual,
+          maxInvitadosPorGraduando: resultado.maxInvitadosPorGraduando,
+        }
+        : actual);
+      setConfiguracionInvitadosSuccess('Límite de invitados por graduando guardado.');
+    } catch (cause) {
+      setConfiguracionInvitadosError(
+        cause instanceof Error ? cause.message : 'No fue posible guardar la configuración de invitados.'
+      );
+    } finally {
+      setSavingConfiguracionInvitados(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!id) return;
+    let activa = true;
+    getFotografiasCeremonia(id)
+      .then((resultado) => {
+        if (!activa) return;
+        setFotosCeremonia({
+          id,
+          items: resultado.map((foto) => ({
+            id: String(foto.slot),
+            url: `data:${foto.mimeType};base64,${foto.base64}`,
+            name: `Fotografía ${foto.slot}`,
+          })),
+        });
+        setFotosCargadasId(id);
+        setFotoErrorActual({ id, mensaje: '' });
+      })
+      .catch((cause) => {
+        if (activa) {
+          setFotoErrorActual({
+            id,
+            mensaje: cause instanceof Error ? cause.message : 'No fue posible cargar las fotografías.',
+          });
+        }
+      });
+    return () => { activa = false; };
+  }, [id]);
+
   const handleAddSesion = async () => {
     if (!id) return;
+    setSesionError('');
+    if ((horaInicio && !horaFin) || (!horaInicio && horaFin) || (horaInicio && horaInicio >= horaFin)) {
+      setSesionError('Completa un rango de horas válido.');
+      return;
+    }
     setSaving(true);
     try {
-      await addSesion(id, {
-        nombre: sesionNombre || `Sesión ${sesiones.length + 1}`,
+      const nuevaSesion = await addSesion(id, {
+        nombre: sesionNombre.trim(),
         estado: sesionEstado as 'Pendiente',
         horaInicio,
         horaFin,
       });
+      setSesiones((actuales) =>
+        [...actuales, nuevaSesion].sort((a, b) => a.numeroSesion - b.numeroSesion)
+      );
       setModalOpen(false);
       setSesionNombre('');
       setHoraInicio('');
       setHoraFin('');
-      load();
+    } catch (cause) {
+      setSesionError(cause instanceof Error ? cause.message : 'No fue posible crear la sesión.');
     } finally {
       setSaving(false);
     }
@@ -98,13 +219,31 @@ export default function DetalleCeremonia() {
     /\.(png|jpe?g|webp|gif)$/i.test(file.name);
 
   const processFiles = (fileList: FileList | File[]) => {
+    if (savingFotos) return;
     const files = Array.from(fileList).filter(isImageFile);
-    if (!files.length) return;
+    if (!fotosCargadas) {
+      setFotoError('Espera a que carguen las fotografías de la ceremonia antes de agregar otras.');
+      return;
+    }
+    if (!files.length) {
+      setFotoError('Selecciona al menos una imagen válida.');
+      return;
+    }
+    if (files.some((file) => file.size > MAX_FOTO_BYTES)) {
+      setFotoError('Cada fotografía debe ocupar como máximo 3 MB.');
+      return;
+    }
+    if (fotos.length + pendingFotos.length + files.length > 4) {
+      setFotoError('La ceremonia permite guardar hasta cuatro fotografías.');
+      return;
+    }
     const nuevos: FotoItem[] = files.map((f) => ({
       id: `up-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       url: URL.createObjectURL(f),
       name: f.name,
+      file: f,
     }));
+    setFotoError('');
     setPendingFotos((prev) => [...prev, ...nuevos]);
   };
 
@@ -123,14 +262,37 @@ export default function DetalleCeremonia() {
     e.target.value = '';
   };
 
-  const handleGuardarFotos = () => {
-    if (!pendingFotos.length) return;
-    setFotos((prev) => [...prev, ...pendingFotos]);
-    setPendingFotos([]);
-    setUploadOpen(false);
+  const handleGuardarFotos = async () => {
+    if (!id || !fotosCargadas || !pendingFotos.length || savingFotos) return;
+    setSavingFotos(true);
+    setFotoError('');
+    try {
+      const fotosParaGuardar = await Promise.all(pendingFotos.map(async (foto) => {
+        if (!foto.file) throw new Error('No fue posible leer una de las fotografías seleccionadas.');
+        return {
+          mimeType: foto.file.type,
+          base64: await convertirArchivoABase64(foto.file),
+        };
+      }));
+      await guardarFotografiasCeremonia(id, fotosParaGuardar);
+      setFotosCeremonia((actuales) => ({
+        id,
+        items: [
+          ...(actuales?.id === id ? actuales.items : []),
+          ...pendingFotos.map((foto) => ({ id: foto.id, url: foto.url, name: foto.name })),
+        ],
+      }));
+      setPendingFotos([]);
+      setUploadOpen(false);
+    } catch (cause) {
+      setFotoError(cause instanceof Error ? cause.message : 'No fue posible guardar las fotografías.');
+    } finally {
+      setSavingFotos(false);
+    }
   };
 
   const handleCancelarUpload = () => {
+    if (savingFotos) return;
     pendingFotos.forEach((f) => {
       if (f.url.startsWith('blob:')) URL.revokeObjectURL(f.url);
     });
@@ -140,6 +302,7 @@ export default function DetalleCeremonia() {
   };
 
   const handleQuitarPending = (fotoId: string) => {
+    if (savingFotos) return;
     setPendingFotos((prev) => {
       const item = prev.find((f) => f.id === fotoId);
       if (item?.url.startsWith('blob:')) URL.revokeObjectURL(item.url);
@@ -148,20 +311,6 @@ export default function DetalleCeremonia() {
   };
 
   const renderFotoThumb = (foto: FotoItem, size = { w: 100, h: 70 }) => {
-    if (foto.url.startsWith('gradient:')) {
-      return (
-        <Box
-          key={foto.id}
-          sx={{
-            width: size.w,
-            height: size.h,
-            borderRadius: '8px',
-            background: GRADIENTS[foto.url] || GRADIENTS['gradient:1'],
-            flexShrink: 0,
-          }}
-        />
-      );
-    }
     return (
       <Box
         key={foto.id}
@@ -181,24 +330,34 @@ export default function DetalleCeremonia() {
 
   if (loading) {
     return (
-      <AdminLayout>
+      <>
         <Box sx={{ display: 'flex', justifyContent: 'center', py: 8 }}>
           <CircularProgress sx={{ color: '#0B3A5C' }} />
         </Box>
-      </AdminLayout>
+      </>
     );
   }
 
   if (!ceremonia) {
     return (
-      <AdminLayout>
+      <>
         <Typography sx={{ textAlign: 'center', py: 8, color: '#5A6A7A' }}>Ceremonia no encontrada</Typography>
-      </AdminLayout>
+      </>
     );
   }
 
+  if (ceremonia.estado === 'Finalizada') {
+    return <Navigate to="/admin/eventos/ceremonias" replace />;
+  }
+
+  const graduandosAsignados = sesiones.reduce(
+    (total, sesion) => total + (sesion.graduandosCount ?? 0),
+    0
+  );
+  const graduandosSinSesion = ceremonia.graduandos - graduandosAsignados;
+
   return (
-    <AdminLayout>
+    <>
       <Box sx={{ mb: 2.5 }}>
         <Typography variant="h4" sx={{ fontWeight: 700, color: '#0B1A2A', fontSize: '1.75rem', mb: 0.5 }}>
           Detalle de ceremonia — Resumen
@@ -218,7 +377,7 @@ export default function DetalleCeremonia() {
             {ceremonia.nombre.replace(/ — Ejemplo \d+/, '') || 'Ceremonia de grados'}
           </Typography>
           <Typography sx={{ color: 'rgba(255,255,255,0.8)', fontSize: '0.85rem' }}>
-            Fecha · Lugar · Estado
+            Fecha: {ceremonia.fecha || '—'} · Lugar: {ceremonia.lugar || '—'}
           </Typography>
         </Box>
         <Chip label={ceremonia.estado} size="small" sx={{
@@ -230,8 +389,8 @@ export default function DetalleCeremonia() {
       <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr 1fr', md: 'repeat(4, 1fr)' }, gap: 1.5, mb: 3 }}>
         {[
           { label: 'Número de sesiones', value: sesiones.length ? String(sesiones.length) : 'Por configurar' },
-          { label: 'Total de graduandos', value: ceremonia.graduandos ? String(ceremonia.graduandos) : 'Por configurar' },
-          { label: 'Total de invitados', value: ceremonia.invitados ? String(ceremonia.invitados) : 'Por configurar' },
+          { label: 'Total de graduandos', value: String(ceremonia.graduandos ?? '—') },
+          { label: 'Total de invitados', value: String(ceremonia.invitados ?? '—') },
           { label: 'Estado de la ceremonia', value: ceremonia.estado },
         ].map((k) => (
           <Card key={k.label} elevation={0} sx={{ borderRadius: '10px', border: '1px solid #E5EAF0' }}>
@@ -242,6 +401,56 @@ export default function DetalleCeremonia() {
           </Card>
         ))}
       </Box>
+
+      <Card elevation={0} sx={{ borderRadius: '12px', border: '1px solid #E5EAF0', mb: 3 }}>
+        <CardContent sx={{ p: 2.5 }}>
+          <Typography sx={{ fontWeight: 700, fontSize: '1rem', color: '#0B1A2A', mb: 0.5 }}>
+            Límite de invitados por graduando
+          </Typography>
+          <Typography sx={{ color: '#5A6A7A', fontSize: '0.85rem', mb: 2 }}>
+            Define cuántos invitados puede registrar cada graduando en esta ceremonia.
+          </Typography>
+          <Box sx={{ maxWidth: 380, mb: 2 }}>
+            <TextField
+              select
+              fullWidth
+              label="Máximo por graduando"
+              value={maxInvitadosPorGraduando}
+              onChange={(e) => setMaxInvitadosPorGraduando(Number(e.target.value))}
+              helperText="El valor habitual es 2; puedes permitir hasta 4."
+              sx={{ '& .MuiOutlinedInput-root': { borderRadius: '8px' } }}
+            >
+              {[2, 3, 4].map((limite) => (
+                <MenuItem key={limite} value={limite}>{limite} invitados</MenuItem>
+              ))}
+            </TextField>
+          </Box>
+          {configuracionInvitadosError && (
+            <Typography role="alert" sx={{ color: '#B42318', fontSize: '0.85rem', mb: 1.5 }}>
+              {configuracionInvitadosError}
+            </Typography>
+          )}
+          {configuracionInvitadosSuccess && (
+            <Typography role="status" sx={{ color: '#1B7A3D', fontSize: '0.85rem', mb: 1.5 }}>
+              {configuracionInvitadosSuccess}
+            </Typography>
+          )}
+          <Box sx={{ display: 'flex', justifyContent: 'flex-end' }}>
+            <Button
+              variant="contained"
+              disabled={savingConfiguracionInvitados}
+              onClick={() => void handleGuardarLimiteInvitados()}
+              sx={{
+                backgroundColor: '#0B3A5C', textTransform: 'none', fontWeight: 600,
+                borderRadius: '8px', boxShadow: 'none',
+                '&:hover': { backgroundColor: '#062A42', boxShadow: 'none' },
+              }}
+            >
+              {savingConfiguracionInvitados ? 'Guardando…' : 'Guardar configuración'}
+            </Button>
+          </Box>
+        </CardContent>
+      </Card>
 
       {/* Sesiones */}
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1.5, flexWrap: 'wrap', gap: 1 }}>
@@ -265,16 +474,28 @@ export default function DetalleCeremonia() {
               <CardContent sx={{ p: 2.5, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                 <Box>
                   <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.5 }}>
-                    <Typography sx={{ fontWeight: 700, fontSize: '1rem', color: '#0B1A2A' }}>{s.nombre}</Typography>
+                    <Typography sx={{ fontWeight: 700, fontSize: '1rem', color: '#0B1A2A' }}>
+                      Sesión {s.numeroSesion}
+                    </Typography>
                     <Chip label={s.estado} size="small" sx={{ backgroundColor: '#FFF4E5', color: '#B76E00', fontWeight: 600, fontSize: '0.7rem', height: 22 }} />
                   </Box>
+                  {s.nombre.trim() !== `Sesión ${s.numeroSesion}` && !/^\d+$/.test(s.nombre.trim()) && (
+                    <Typography sx={{ color: '#5A6A7A', fontSize: '0.85rem', mb: 0.5 }}>
+                      {s.nombre}
+                    </Typography>
+                  )}
                   <Typography sx={{ color: '#5A6A7A', fontSize: '0.85rem' }}>
                     {s.horaInicio ? `${s.horaInicio} – ${s.horaFin}` : 'Horario por definir'}
                   </Typography>
                   <Typography sx={{ color: '#5A6A7A', fontSize: '0.85rem' }}>
                     {s.programas.length ? s.programas.join(', ') : 'Programas por configurar'}
                   </Typography>
-                  <Typography sx={{ color: '#5A6A7A', fontSize: '0.85rem' }}>Graduandos por configurar</Typography>
+                  <Typography sx={{ color: '#5A6A7A', fontSize: '0.85rem' }}>
+                    Graduandos: {s.graduandosCount ?? '—'}
+                  </Typography>
+                  <Typography sx={{ color: '#5A6A7A', fontSize: '0.85rem' }}>
+                    Invitados: {s.invitadosCount ?? '—'}
+                  </Typography>
                 </Box>
                 <Button variant="contained" size="small"
                   onClick={() => navigate(`/admin/eventos/ceremonias/${id}/sesion/${s.id}`)}
@@ -295,14 +516,37 @@ export default function DetalleCeremonia() {
             <Typography sx={{ fontWeight: 700, fontSize: '1rem', color: '#0B1A2A', mb: 2 }}>Resumen del avance</Typography>
             {[
               { label: 'Sesiones', value: sesiones.length ? String(sesiones.length) : 'Por configurar' },
-              { label: 'Graduandos', value: 'Por configurar' },
-              { label: 'Invitados', value: 'Por configurar' },
+              { label: 'Graduandos', value: String(ceremonia.graduandos ?? '—') },
+              { label: 'Asignados a sesiones', value: String(graduandosAsignados) },
+              {
+                label: 'Sin sesión asignada',
+                value: graduandosSinSesion >= 0 ? String(graduandosSinSesion) : 'Revisar conteo',
+              },
+              { label: 'Invitados', value: String(ceremonia.invitados ?? '—') },
             ].map((r) => (
               <Box key={r.label} sx={{ display: 'flex', justifyContent: 'space-between', mb: 1.25 }}>
                 <Typography sx={{ color: '#5A6A7A', fontSize: '0.875rem' }}>{r.label}</Typography>
                 <Typography sx={{ fontWeight: 600, color: '#1A2A3A', fontSize: '0.875rem' }}>{r.value}</Typography>
               </Box>
             ))}
+            {graduandosSinSesion > 0 ? (
+              <Box sx={{ mt: 2, p: 1.5, borderRadius: '8px', backgroundColor: '#FFF4E5' }}>
+                <Typography sx={{ color: '#8A5700', fontSize: '0.85rem' }}>
+                  {graduandosSinSesion} {graduandosSinSesion === 1 ? 'graduando no tiene' : 'graduandos no tienen'} sesión asignada. Para ubicarlos, abre el listado y selecciona el filtro «Sin asignar».
+                </Typography>
+                <Button
+                  size="small"
+                  onClick={() => navigate(`/admin/eventos/ceremonias/${id}/graduandos`)}
+                  sx={{ mt: 0.5, px: 0, textTransform: 'none', fontWeight: 600 }}
+                >
+                  Abrir listado de graduandos
+                </Button>
+              </Box>
+            ) : graduandosSinSesion < 0 ? (
+              <Typography sx={{ color: '#B42318', fontSize: '0.85rem', mt: 2 }}>
+                La suma de graduandos asignados a las sesiones supera el total de la ceremonia. Revisa los registros.
+              </Typography>
+            ) : null}
             <Typography sx={{ color: '#5A6A7A', fontSize: '0.8rem', mt: 2 }}>
               El detalle operativo se configura dentro de cada sesión.
             </Typography>
@@ -319,6 +563,11 @@ export default function DetalleCeremonia() {
           <Typography sx={{ color: '#5A6A7A', fontSize: '0.85rem', mb: 1.5 }}>
             Evidencias visuales asociadas a la ceremonia.
           </Typography>
+          {fotoError && (
+            <Typography role="alert" sx={{ color: '#B71C1C', fontSize: '0.85rem', mb: 1.5 }}>
+              {fotoError}
+            </Typography>
+          )}
 
           {/* Miniaturas guardadas + botón agregar */}
           {!uploadOpen && (
@@ -482,6 +731,7 @@ export default function DetalleCeremonia() {
                   <Button
                     variant="contained"
                     onClick={handleGuardarFotos}
+                    disabled={savingFotos || !fotosCargadas}
                     sx={{
                       backgroundColor: '#1565C0',
                       textTransform: 'none',
@@ -548,20 +798,48 @@ export default function DetalleCeremonia() {
         px: 2.5, py: 1.75, mt: 1, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 1,
       }}>
         <Box>
-          <Typography sx={{ fontWeight: 600, fontSize: '0.95rem', color: '#0B1A2A' }}>Finalizar ceremonia</Typography>
-          <Typography sx={{ color: '#5A6A7A', fontSize: '0.85rem' }}>Finaliza la ceremonia y guarda su información en el historial.</Typography>
+          <Typography sx={{ fontWeight: 600, fontSize: '0.95rem', color: '#0B1A2A' }}>
+            {ceremonia.estado === 'Programada'
+              ? 'Iniciar ceremonia'
+              : ceremonia.estado === 'En curso'
+                ? 'Finalizar ceremonia'
+                : `Ceremonia ${ceremonia.estado.toLowerCase()}`}
+          </Typography>
+          <Typography sx={{ color: '#5A6A7A', fontSize: '0.85rem' }}>
+            {ceremonia.estado === 'Programada'
+              ? 'Inicia la ceremonia.'
+              : ceremonia.estado === 'En curso'
+                ? 'Finaliza la ceremonia y guarda su información en el historial.'
+                : 'El estado de la ceremonia es definitivo.'}
+          </Typography>
+          {estadoCeremoniaError && (
+            <Typography role="alert" sx={{ color: '#B42318', fontSize: '0.85rem', mt: 1 }}>
+              {estadoCeremoniaError}
+            </Typography>
+          )}
         </Box>
-        <Button variant="contained" sx={{
-          backgroundColor: '#E30613', textTransform: 'none', fontWeight: 600, borderRadius: '8px', boxShadow: 'none',
-          '&:hover': { backgroundColor: '#C10510', boxShadow: 'none' },
-        }}>
-          Finalizar ceremonia
+        <Button
+          variant="contained"
+          disabled={savingEstadoCeremonia || !['Programada', 'En curso'].includes(ceremonia.estado)}
+          onClick={() => void handleAvanzarEstadoCeremonia()}
+          sx={{
+            backgroundColor: '#E30613', textTransform: 'none', fontWeight: 600, borderRadius: '8px', boxShadow: 'none',
+            '&:hover': { backgroundColor: '#C10510', boxShadow: 'none' },
+          }}
+        >
+          {savingEstadoCeremonia
+            ? 'Guardando…'
+            : ceremonia.estado === 'Programada'
+              ? 'Iniciar ceremonia'
+              : ceremonia.estado === 'En curso'
+                ? 'Finalizar ceremonia'
+                : `Ceremonia ${ceremonia.estado.toLowerCase()}`}
         </Button>
       </Box>
 
       {/* Modal Agregar sesión */}
       <Dialog open={modalOpen} onClose={() => setModalOpen(false)} maxWidth="sm" fullWidth
-        PaperProps={{ sx: { borderRadius: '12px' } }}>
+        slotProps={{ paper: { sx: { borderRadius: '12px' } } }}>
         <DialogTitle sx={{ fontWeight: 700, pr: 6 }}>
           Agregar sesión
           <IconButton onClick={() => setModalOpen(false)} sx={{ position: 'absolute', right: 12, top: 12 }}>
@@ -569,6 +847,11 @@ export default function DetalleCeremonia() {
           </IconButton>
         </DialogTitle>
         <DialogContent>
+          {sesionError && (
+            <Typography role="alert" sx={{ color: '#B42318', fontSize: '0.875rem', mb: 2 }}>
+              {sesionError}
+            </Typography>
+          )}
           <Typography sx={{ color: '#5A6A7A', fontSize: '0.875rem', mb: 2 }}>
             Configura los datos básicos de una nueva sesión para esta ceremonia.
           </Typography>
@@ -579,8 +862,9 @@ export default function DetalleCeremonia() {
             <Typography sx={{ color: '#5A6A7A', fontSize: '0.8rem' }}>Fecha · Lugar</Typography>
           </Box>
           <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 2, mb: 2 }}>
-            <TextField size="small" label="Sesión" value={sesionNombre}
-              onChange={(e) => setSesionNombre(e.target.value)} placeholder="Sesión 1"
+            <TextField size="small" label="Nombre de referencia (opcional)" value={sesionNombre}
+              onChange={(e) => setSesionNombre(e.target.value)} placeholder="Ej. Jornada de la mañana"
+              helperText="El número se asigna automáticamente en orden: Sesión 1, Sesión 2, etc."
               sx={{ '& .MuiOutlinedInput-root': { borderRadius: '8px' } }} />
             <TextField select size="small" label="Estado" value={sesionEstado}
               onChange={(e) => setSesionEstado(e.target.value)}
@@ -617,6 +901,6 @@ export default function DetalleCeremonia() {
           </Button>
         </DialogActions>
       </Dialog>
-    </AdminLayout>
+    </>
   );
 }

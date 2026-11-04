@@ -16,16 +16,16 @@ import {
   Chip,
   CircularProgress,
   IconButton,
+  Alert,
 } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
 import CloseIcon from '@mui/icons-material/Close';
-
-import AdminLayout from '../../../../../components/layout/AdminLayout';
 import type { Ceremonia, Sesion } from './interfaces/ceremonias.interface';
 import {
   getCeremoniaById,
   getSesionById,
-  PROGRAMA_OPTIONS,
+  getProgramasActivos,
+  updateSesion,
   HORA_OPTIONS,
 } from './services/ceremonias.service';
 
@@ -41,15 +41,19 @@ export default function ConfigurarSesion() {
   const [horaFin, setHoraFin] = useState('');
   /** Programas ya asociados a la sesión */
   const [programas, setProgramas] = useState<string[]>([]);
+  const [programasActivos, setProgramasActivos] = useState<string[]>([]);
   /** Selección temporal del dropdown antes de agregar */
   const [programaSeleccionado, setProgramaSeleccionado] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
 
   useEffect(() => {
     if (!id || !sesionId) return;
-    Promise.all([getCeremoniaById(id), getSesionById(sesionId)])
-      .then(([c, s]) => {
+    Promise.all([getCeremoniaById(id), getSesionById(sesionId), getProgramasActivos()])
+      .then(([c, s, p]) => {
         setCeremonia(c);
         setSesion(s);
+        setProgramasActivos(p);
         if (s) {
           setNombre(s.nombre);
           setEstado(s.estado);
@@ -60,10 +64,13 @@ export default function ConfigurarSesion() {
           }
         }
       })
+      .catch((loadError: unknown) => {
+        setError(loadError instanceof Error ? loadError.message : 'No fue posible cargar la configuración de la sesión.');
+      })
       .finally(() => setLoading(false));
   }, [id, sesionId]);
 
-  const programasDisponibles = PROGRAMA_OPTIONS.filter(
+  const programasDisponibles = programasActivos.filter(
     (p) => !programas.includes(p)
   );
 
@@ -78,18 +85,47 @@ export default function ConfigurarSesion() {
     setProgramas((prev) => prev.filter((p) => p !== prog));
   };
 
+  const handleGuardarSesion = async () => {
+    if (!sesionId || !id) return;
+    if (!nombre.trim()) {
+      setError('Ingresa el nombre de la sesión.');
+      return;
+    }
+    if ((horaInicio && !horaFin) || (!horaInicio && horaFin) || (horaInicio && horaInicio >= horaFin)) {
+      setError('Completa un rango de horas válido.');
+      return;
+    }
+
+    setSaving(true);
+    setError('');
+    try {
+      await updateSesion(sesionId, {
+        nombre: nombre.trim(),
+        estado: estado as Sesion['estado'],
+        horaInicio,
+        horaFin,
+        programas,
+      });
+      navigate(`/admin/eventos/ceremonias/${id}`);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'No fue posible guardar la sesión.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
   if (loading) {
     return (
-      <AdminLayout>
+      <>
         <Box sx={{ display: 'flex', justifyContent: 'center', py: 8 }}>
           <CircularProgress sx={{ color: '#0B3A5C' }} />
         </Box>
-      </AdminLayout>
+      </>
     );
   }
 
   return (
-    <AdminLayout>
+    <>
       <Box sx={{ mb: 2.5 }}>
         <Typography
           variant="h4"
@@ -496,6 +532,7 @@ export default function ConfigurarSesion() {
       <Box
         sx={{ display: 'flex', justifyContent: 'flex-end', gap: 1.5, mt: 3 }}
       >
+        {error && <Alert severity="error" sx={{ mr: 'auto' }}>{error}</Alert>}
         <Button
           variant="outlined"
           onClick={() => navigate(`/admin/eventos/ceremonias/${id}`)}
@@ -511,7 +548,8 @@ export default function ConfigurarSesion() {
         </Button>
         <Button
           variant="contained"
-          onClick={() => navigate(`/admin/eventos/ceremonias/${id}`)}
+          disabled={saving}
+          onClick={handleGuardarSesion}
           sx={{
             backgroundColor: '#E30613',
             textTransform: 'none',
@@ -528,6 +566,6 @@ export default function ConfigurarSesion() {
           Guardar sesión
         </Button>
       </Box>
-    </AdminLayout>
+    </>
   );
 }

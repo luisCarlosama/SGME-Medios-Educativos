@@ -6,16 +6,16 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
-  Box, Typography, Button, Table, TableBody, TableCell, TableContainer,
+  Alert, Box, Typography, Button, Table, TableBody, TableCell, TableContainer,
   TableHead, TableRow, Chip, Dialog, DialogTitle, DialogContent, DialogActions,
   TextField, MenuItem, IconButton, CircularProgress, Card, CardContent,
 } from '@mui/material';
 import CloseIcon from '@mui/icons-material/Close';
 import AddIcon from '@mui/icons-material/Add';
-import AdminLayout from '../../../../../components/layout/AdminLayout';
-import type { Graduando, Invitado } from './interfaces/ceremonias.interface';
+import type { Graduando, Invitado, ProgramaOption, Sesion } from './interfaces/ceremonias.interface';
 import {
-  getGraduandoById, getInvitados, updateInvitado, addInvitado, PROGRAMA_OPTIONS,
+  getGraduandoById, getInvitados, updateInvitado, addInvitado,
+  getProgramasCatalogo, getSesiones, updateGraduando,
 } from './services/ceremonias.service';
 
 export default function GraduandoDetalle() {
@@ -23,7 +23,14 @@ export default function GraduandoDetalle() {
   const navigate = useNavigate();
   const [graduando, setGraduando] = useState<Graduando | null>(null);
   const [invitados, setInvitados] = useState<Invitado[]>([]);
+  const [programas, setProgramas] = useState<ProgramaOption[]>([]);
+  const [sesiones, setSesiones] = useState<Sesion[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
+  const [formError, setFormError] = useState('');
+  const [savingGraduando, setSavingGraduando] = useState(false);
+  const [invError, setInvError] = useState('');
+  const [savingInvitado, setSavingInvitado] = useState(false);
 
   // Modals
   const [editGradOpen, setEditGradOpen] = useState(false);
@@ -48,22 +55,32 @@ export default function GraduandoDetalle() {
     if (!graduandoId || !id) return;
     setLoading(true);
     try {
-      const [g, invs] = await Promise.all([
+      const [g, invs, programasDisponibles, sesionesDisponibles] = await Promise.all([
         getGraduandoById(graduandoId),
         getInvitados(id, graduandoId),
+        getProgramasCatalogo(),
+        getSesiones(id),
       ]);
       setGraduando(g);
       setInvitados(invs);
+      setProgramas(programasDisponibles.filter((programa) => programa.estado));
+      setSesiones(sesionesDisponibles);
+      setLoadError('');
       if (g) {
         setFormNombres(g.nombres);
         setFormApellidos(g.apellidos);
         setFormDoc(g.documento);
-        setFormTel(g.telefono || 'No registrado');
-        setFormCorreo(g.correo || 'No registrado');
-        setFormCodigo(g.codigoEstudiantil || 'No registrado');
-        setFormPrograma(g.programa);
-        setFormSesion(g.sesionLabel || 'Sesión asociada');
+        setFormTel(g.telefono || '');
+        setFormCorreo(g.correo || '');
+        setFormCodigo(g.codigoEstudiantil || '');
+        const programasGraduando = g.programaIds ?? [];
+        setFormPrograma(
+          programasGraduando.length === 1 ? String(programasGraduando[0]) : '',
+        );
+        setFormSesion(g.sesionId || '');
       }
+    } catch (loadFailure) {
+      setLoadError(loadFailure instanceof Error ? loadFailure.message : 'No fue posible cargar el detalle del graduando.');
     } finally {
       setLoading(false);
     }
@@ -71,45 +88,103 @@ export default function GraduandoDetalle() {
 
   useEffect(() => { load(); }, [load]);
 
+  const programaSeleccionado = programas.find(
+    (programa) => String(programa.id_programa) === formPrograma,
+  );
+  const sesionesCompatibles = sesiones.filter((sesionActual) =>
+    Boolean(programaSeleccionado && (
+      sesionActual.programaIds?.includes(programaSeleccionado.id_programa)
+      ?? sesionActual.programas.includes(programaSeleccionado.nombre)
+    ))
+  );
+  const programaId = graduando?.programaIds?.[0];
+
+  const handleSaveGraduando = async () => {
+    if (!graduandoId || !graduando) return;
+    if (!formPrograma) {
+      setFormError('Selecciona un programa académico.');
+      return;
+    }
+    setSavingGraduando(true);
+    setFormError('');
+    try {
+      const actualizado = await updateGraduando(graduandoId, {
+        nombres: formNombres,
+        apellidos: formApellidos,
+        documento: formDoc,
+        telefono: formTel,
+        correo: formCorreo,
+        codigoEstudiantil: formCodigo,
+        programaIds: [Number(formPrograma)],
+        idSesion: formSesion || null,
+        estado: graduando.estado ?? true,
+        requisitosCumplidos: graduando.requisitosCumplidos ?? false,
+        tallaToga: graduando.tallaToga,
+      });
+      setGraduando(actualizado);
+      setEditGradOpen(false);
+    } catch (saveError) {
+      setFormError(saveError instanceof Error ? saveError.message : 'No fue posible actualizar el graduando.');
+    } finally {
+      setSavingGraduando(false);
+    }
+  };
+
   const openEditInv = (inv: Invitado) => {
     setSelectedInv(inv);
     setInvNombre(inv.nombre);
     setInvDoc(inv.documento);
     setInvEstado(inv.autorizacion);
+    setInvError('');
     setEditInvOpen(true);
   };
 
   const handleSaveInv = async () => {
-    if (selectedInv) {
-      await updateInvitado(selectedInv.id, {
-        nombre: invNombre,
-        documento: invDoc,
-        autorizacion: invEstado as 'Autorizado' | 'Pendiente',
-      });
-    } else if (graduandoId && id) {
-      await addInvitado({
-        graduandoId,
-        ceremoniaId: id,
-        nombre: invNombre,
-        documento: invDoc,
-        graduandoNombre: graduando ? `${graduando.nombres} ${graduando.apellidos}` : '',
-        tipo: 'Familiar',
-        autorizacion: invEstado as 'Autorizado' | 'Pendiente',
-      });
+    if (!invNombre.trim()) {
+      setInvError('Ingresa el nombre del invitado.');
+      return;
     }
-    setEditInvOpen(false);
-    setAddInvOpen(false);
-    setSelectedInv(null);
-    load();
+    setSavingInvitado(true);
+    setInvError('');
+    try {
+      let invitadoGuardado: Invitado | null = null;
+      if (selectedInv) {
+        invitadoGuardado = await updateInvitado(selectedInv.id, {
+          nombre: invNombre,
+          documento: invDoc,
+          autorizacion: invEstado as 'Autorizado' | 'Pendiente',
+        });
+      } else if (graduandoId) {
+        invitadoGuardado = await addInvitado({
+          graduandoId,
+          nombre: invNombre,
+          documento: invDoc,
+          autorizacion: invEstado as 'Autorizado' | 'Pendiente',
+        });
+      }
+      if (!invitadoGuardado) {
+        throw new Error('No fue posible guardar el invitado.');
+      }
+      setInvitados((actuales) => selectedInv
+        ? actuales.map((invitado) => invitado.id === invitadoGuardado?.id ? invitadoGuardado : invitado)
+        : [...actuales, invitadoGuardado]);
+      setEditInvOpen(false);
+      setAddInvOpen(false);
+      setSelectedInv(null);
+    } catch (saveError) {
+      setInvError(saveError instanceof Error ? saveError.message : 'No fue posible guardar el invitado.');
+    } finally {
+      setSavingInvitado(false);
+    }
   };
 
   if (loading) {
     return (
-      <AdminLayout>
+      <>
         <Box sx={{ display: 'flex', justifyContent: 'center', py: 8 }}>
           <CircularProgress sx={{ color: '#0B3A5C' }} />
         </Box>
-      </AdminLayout>
+      </>
     );
   }
 
@@ -117,7 +192,7 @@ export default function GraduandoDetalle() {
   const pendientes = invitados.filter((i) => i.autorizacion === 'Pendiente').length;
 
   return (
-    <AdminLayout>
+    <>
       <Box sx={{ mb: 2 }}>
         <Typography variant="h4" sx={{ fontWeight: 700, color: '#0B1A2A', fontSize: '1.75rem', mb: 0.5 }}>
           Graduando + invitados — Detalle
@@ -126,6 +201,7 @@ export default function GraduandoDetalle() {
           Eventos institucionales / Ceremonias de grado / Graduandos / Detalle
         </Typography>
       </Box>
+      {loadError && <Alert severity="error" sx={{ mb: 2 }}>{loadError}</Alert>}
 
       {/* Breadcrumb bar */}
       <Box sx={{
@@ -137,9 +213,41 @@ export default function GraduandoDetalle() {
           <Typography sx={{ fontWeight: 700, fontSize: '0.95rem', color: '#0B1A2A' }}>Ceremonia de grados</Typography>
           <Typography sx={{ color: '#5A6A7A', fontSize: '0.8rem' }}>Fecha · Lugar</Typography>
         </Box>
-        <Typography sx={{ color: '#1565C0', fontSize: '0.75rem', fontWeight: 600, letterSpacing: 0.5 }}>
-          CEREMONIA → SESIÓN → PROGRAMA → GRADUANDO
-        </Typography>
+        <Box sx={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 0.25 }}>
+          <Button
+            size="small"
+            disabled={!id}
+            onClick={() => navigate(`/admin/eventos/ceremonias/${id}`)}
+            sx={{ color: '#1565C0', fontSize: '0.75rem', fontWeight: 600, letterSpacing: 0.5, minWidth: 0 }}
+          >
+            CEREMONIA
+          </Button>
+          <Typography aria-hidden="true" sx={{ color: '#1565C0', fontSize: '0.75rem' }}>→</Typography>
+          <Button
+            size="small"
+            disabled={!id || !graduando?.sesionId}
+            onClick={() => navigate(`/admin/eventos/ceremonias/${id}/sesion/${graduando?.sesionId}`)}
+            sx={{ color: '#1565C0', fontSize: '0.75rem', fontWeight: 600, letterSpacing: 0.5, minWidth: 0 }}
+          >
+            SESIÓN
+          </Button>
+          <Typography aria-hidden="true" sx={{ color: '#1565C0', fontSize: '0.75rem' }}>→</Typography>
+          <Button
+            size="small"
+            disabled={!id || !programaId}
+            onClick={() => {
+              if (!id || !programaId) return;
+              navigate(`/admin/eventos/ceremonias/${id}/graduandos?programa=${encodeURIComponent(String(programaId))}`);
+            }}
+            sx={{ color: '#1565C0', fontSize: '0.75rem', fontWeight: 600, letterSpacing: 0.5, minWidth: 0 }}
+          >
+            PROGRAMA
+          </Button>
+          <Typography aria-hidden="true" sx={{ color: '#1565C0', fontSize: '0.75rem' }}>→</Typography>
+          <Typography aria-current="page" sx={{ color: '#1565C0', fontSize: '0.75rem', fontWeight: 600, letterSpacing: 0.5, px: 1 }}>
+            GRADUANDO
+          </Typography>
+        </Box>
       </Box>
 
       {/* Info graduando */}
@@ -196,7 +304,7 @@ export default function GraduandoDetalle() {
           </Typography>
         </Box>
         <Button variant="contained" startIcon={<AddIcon />}
-          onClick={() => { setSelectedInv(null); setInvNombre(''); setInvDoc(''); setInvEstado('Autorizado'); setAddInvOpen(true); }}
+          onClick={() => { setSelectedInv(null); setInvNombre(''); setInvDoc(''); setInvEstado('Autorizado'); setInvError(''); setAddInvOpen(true); }}
           sx={{
             backgroundColor: '#E30613', textTransform: 'none', fontWeight: 600, borderRadius: '8px',
             boxShadow: 'none', '&:hover': { backgroundColor: '#C10510', boxShadow: 'none' },
@@ -259,7 +367,7 @@ export default function GraduandoDetalle() {
 
       {/* Modal Editar graduando */}
       <Dialog open={editGradOpen} onClose={() => setEditGradOpen(false)} maxWidth="md" fullWidth
-        PaperProps={{ sx: { borderRadius: '12px' } }}>
+        slotProps={{ paper: { sx: { borderRadius: '12px' } } }}>
         <DialogTitle sx={{ fontWeight: 700 }}>
           Editar graduando
           <IconButton onClick={() => setEditGradOpen(false)} sx={{ position: 'absolute', right: 12, top: 12 }}>
@@ -267,6 +375,7 @@ export default function GraduandoDetalle() {
           </IconButton>
         </DialogTitle>
         <DialogContent>
+          {formError && <Alert severity="error" sx={{ mb: 2 }}>{formError}</Alert>}
           <Typography sx={{ color: '#5A6A7A', fontSize: '0.875rem', mb: 2 }}>
             Actualiza la información del graduando registrado en la ceremonia.
           </Typography>
@@ -276,7 +385,7 @@ export default function GraduandoDetalle() {
               <Box sx={{ width: 40, height: 3, backgroundColor: '#E30613', mb: 1.5 }} />
               <TextField fullWidth size="small" label="Nombres" value={formNombres} onChange={(e) => setFormNombres(e.target.value)} sx={{ mb: 1.5, '& .MuiOutlinedInput-root': { borderRadius: '8px' } }} />
               <TextField fullWidth size="small" label="Apellidos" value={formApellidos} onChange={(e) => setFormApellidos(e.target.value)} sx={{ mb: 1.5, '& .MuiOutlinedInput-root': { borderRadius: '8px' } }} />
-              <TextField fullWidth size="small" label="Documento" value={formDoc} onChange={(e) => setFormDoc(e.target.value)} sx={{ mb: 1.5, '& .MuiOutlinedInput-root': { borderRadius: '8px' } }} />
+              <TextField fullWidth size="small" label="Documento" value={formDoc} onChange={(e) => setFormDoc(e.target.value.replace(/\D/g, ''))} sx={{ mb: 1.5, '& .MuiOutlinedInput-root': { borderRadius: '8px' } }} />
               <TextField fullWidth size="small" label="Teléfono" value={formTel} onChange={(e) => setFormTel(e.target.value)} sx={{ mb: 1.5, '& .MuiOutlinedInput-root': { borderRadius: '8px' } }} />
               <TextField fullWidth size="small" label="Correo electrónico" value={formCorreo} onChange={(e) => setFormCorreo(e.target.value)} sx={{ '& .MuiOutlinedInput-root': { borderRadius: '8px' } }} />
             </Box>
@@ -284,10 +393,48 @@ export default function GraduandoDetalle() {
               <Typography sx={{ fontWeight: 700, fontSize: '0.9rem', mb: 0.5 }}>Información académica</Typography>
               <Box sx={{ width: 40, height: 3, backgroundColor: '#E30613', mb: 1.5 }} />
               <TextField fullWidth size="small" label="Código estudiantil" value={formCodigo} onChange={(e) => setFormCodigo(e.target.value)} sx={{ mb: 1.5, '& .MuiOutlinedInput-root': { borderRadius: '8px' } }} />
-              <TextField select fullWidth size="small" label="Programa académico" value={formPrograma} onChange={(e) => setFormPrograma(e.target.value)} sx={{ mb: 1.5, '& .MuiOutlinedInput-root': { borderRadius: '8px' } }}>
-                {PROGRAMA_OPTIONS.map((p) => <MenuItem key={p} value={p}>{p}</MenuItem>)}
+              <TextField
+                select
+                fullWidth
+                size="small"
+                label="Programa académico"
+                value={formPrograma}
+                helperText={(graduando?.programaIds?.length ?? 0) > 1
+                  ? 'Este registro tiene varios programas. Selecciona uno para conservarlo al guardar.'
+                  : undefined}
+                onChange={(e) => {
+                  const seleccionado = e.target.value;
+                  setFormPrograma(seleccionado);
+                  const sesionActual = sesiones.find((sesionItem) => sesionItem.id === formSesion);
+                  const programa = programas.find(
+                    (item) => String(item.id_programa) === seleccionado,
+                  );
+                  const coincide = Boolean(programa && sesionActual && (
+                    sesionActual.programaIds?.includes(programa.id_programa)
+                    ?? sesionActual.programas.includes(programa.nombre)
+                  ));
+                  if (!coincide) setFormSesion('');
+                }} sx={{ mb: 1.5, '& .MuiOutlinedInput-root': { borderRadius: '8px' } }}>
+                <MenuItem value="">Selecciona un programa</MenuItem>
+                {programas.map((programa) => (
+                  <MenuItem key={programa.id_programa} value={String(programa.id_programa)}>
+                    {programa.nombre}
+                  </MenuItem>
+                ))}
               </TextField>
-              <TextField fullWidth size="small" label="Sesión" value={formSesion} onChange={(e) => setFormSesion(e.target.value)} sx={{ '& .MuiOutlinedInput-root': { borderRadius: '8px' } }} />
+              <TextField select fullWidth size="small" label="Sesión" value={formSesion}
+                onChange={(e) => setFormSesion(e.target.value)}
+                helperText={
+                  sesiones.length === 0
+                    ? 'No hay sesiones configuradas para esta ceremonia.'
+                    : sesionesCompatibles.length === 0
+                      ? 'No hay sesiones asociadas a los programas académicos de este graduando.'
+                      : 'Solo se muestran sesiones asociadas a sus programas académicos.'
+                }
+                sx={{ '& .MuiOutlinedInput-root': { borderRadius: '8px' } }}>
+                <MenuItem value="">Sin asignar</MenuItem>
+                {sesionesCompatibles.map((sesion) => <MenuItem key={sesion.id} value={sesion.id}>{sesion.nombre}</MenuItem>)}
+              </TextField>
               <Typography sx={{ color: '#5A6A7A', fontSize: '0.8rem', mt: 1 }}>
                 Los campos muestran la información actual registrada del graduando.
               </Typography>
@@ -296,16 +443,16 @@ export default function GraduandoDetalle() {
         </DialogContent>
         <DialogActions sx={{ px: 3, pb: 2.5 }}>
           <Button onClick={() => setEditGradOpen(false)} sx={{ textTransform: 'none', color: '#5A6A7A' }}>Cancelar</Button>
-          <Button variant="contained" onClick={() => setEditGradOpen(false)}
+          <Button variant="contained" disabled={savingGraduando} onClick={handleSaveGraduando}
             sx={{ backgroundColor: '#0B3A5C', textTransform: 'none', fontWeight: 600, borderRadius: '8px', '&:hover': { backgroundColor: '#062A42' } }}>
-            Guardar cambios
+            {savingGraduando ? 'Guardando…' : 'Guardar cambios'}
           </Button>
         </DialogActions>
       </Dialog>
 
       {/* Modal Agregar / Editar invitado */}
       <Dialog open={addInvOpen || editInvOpen} onClose={() => { setAddInvOpen(false); setEditInvOpen(false); }} maxWidth="sm" fullWidth
-        PaperProps={{ sx: { borderRadius: '12px' } }}>
+        slotProps={{ paper: { sx: { borderRadius: '12px' } } }}>
         <DialogTitle sx={{ fontWeight: 700 }}>
           {editInvOpen ? 'Editar invitado' : 'Agregar invitado'}
           <IconButton onClick={() => { setAddInvOpen(false); setEditInvOpen(false); }} sx={{ position: 'absolute', right: 12, top: 12 }}>
@@ -313,6 +460,7 @@ export default function GraduandoDetalle() {
           </IconButton>
         </DialogTitle>
         <DialogContent>
+          {invError && <Alert severity="error" sx={{ mb: 2 }}>{invError}</Alert>}
           <Typography sx={{ color: '#5A6A7A', fontSize: '0.875rem', mb: 2 }}>
             Actualiza la información del invitado asociado al graduando.
           </Typography>
@@ -335,15 +483,15 @@ export default function GraduandoDetalle() {
           <Button onClick={() => { setAddInvOpen(false); setEditInvOpen(false); }} sx={{ textTransform: 'none', color: '#5A6A7A' }}>
             Cancelar
           </Button>
-          <Button variant="contained" onClick={handleSaveInv}
+          <Button variant="contained" disabled={savingInvitado} onClick={handleSaveInv}
             sx={{
               backgroundColor: '#E30613', textTransform: 'none', fontWeight: 600, borderRadius: '8px',
               boxShadow: 'none', '&:hover': { backgroundColor: '#C10510', boxShadow: 'none' },
             }}>
-            Guardar cambios
+            {savingInvitado ? 'Guardando…' : 'Guardar cambios'}
           </Button>
         </DialogActions>
       </Dialog>
-    </AdminLayout>
+    </>
   );
 }

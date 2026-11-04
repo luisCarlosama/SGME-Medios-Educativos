@@ -6,20 +6,36 @@ import pool from './src/db.js';
 import authRoutes from './src/routes/authRoutes.js'; 
 import dashboardRoutes from './src/routes/dashboardRoutes.js'; 
 import reservasRoutes from './src/routes/reservasRoutes.js';
+import ceremoniasRoutes from './src/routes/ceremoniasRoutes.js';
 
 dotenv.config();
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 6001;
+const frontendOrigins = (
+  process.env.FRONTEND_ORIGIN ||
+  'http://localhost:5173,http://localhost:5174'
+)
+  .split(',')
+  .map((origin) => origin.trim());
 
 app.use(cors({
-  origin: process.env.FRONTEND_ORIGIN || 'http://localhost:5173',
+  origin: frontendOrigins,
 }));
 
+app.use(
+  '/api/ceremonias/:id/fotografias',
+  express.json({ limit: '18mb' })
+);
+app.use(
+  '/api/ceremonias/:id/graduandos/importacion',
+  express.json({ limit: '2mb' })
+);
 app.use(express.json());
 app.use('/api/auth', authRoutes);
 app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/reservas', reservasRoutes);
+app.use('/api/ceremonias', ceremoniasRoutes);
 
 
 app.get('/', (req, res) => {
