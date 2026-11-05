@@ -1,11 +1,12 @@
-import { randomUUID } from 'node:crypto';
 import pool from '../db.js';
 
-const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const ID_INTEGER_REGEX = /^[1-9]\d*$/;
 const ESTADOS_CEREMONIA = new Set(['Programada', 'En curso', 'Finalizada', 'Cancelada']);
-const ESTADOS_SESION = new Set(['Pendiente', 'En curso', 'Finalizada']);
+const ESTADOS_SESION_CONFIGURABLES = new Set(['Programada', 'En curso', 'Finalizada']);
 const ESTADOS_AUTORIZACION = new Set(['Autorizado', 'Pendiente']);
 const MAX_FILAS_IMPORTACION = 1000;
+const HORA_MINIMA_CEREMONIA = '07:00';
+const HORA_MAXIMA_CEREMONIA = '20:00';
 
 function errorHttp(status, message) {
   const error = new Error(message);
@@ -47,7 +48,11 @@ function normalizarNombrePrograma(value) {
 }
 
 function validarId(value, nombre) {
-  if (typeof value !== 'string' || !UUID_REGEX.test(value)) {
+  if (
+    typeof value !== 'string'
+    || !ID_INTEGER_REGEX.test(value)
+    || !Number.isSafeInteger(Number(value))
+  ) {
     throw errorHttp(400, `El identificador de ${nombre} no es válido.`);
   }
 }
@@ -63,6 +68,11 @@ function validarHora(value, nombre) {
 function validarHorario(body) {
   const horaInicio = validarHora(body.horaInicio, 'La hora de inicio');
   const horaFin = validarHora(body.horaFin, 'La hora de finalización');
+  if ([horaInicio, horaFin].some((hora) =>
+    hora !== null && (hora < HORA_MINIMA_CEREMONIA || hora > HORA_MAXIMA_CEREMONIA)
+  )) {
+    throw errorHttp(400, 'Las horas de la ceremonia deben estar entre 07:00 AM y 08:00 PM.');
+  }
   if ((horaInicio && !horaFin) || (!horaInicio && horaFin) || (horaInicio && horaInicio >= horaFin)) {
     throw errorHttp(400, 'Completa un rango de horas válido.');
   }
@@ -71,11 +81,11 @@ function validarHorario(body) {
 
 async function obtenerCeremonia(executor, id, bloquear = false) {
   const resultado = await executor.query(
-    `SELECT id::text AS id, estado,
+    `SELECT id_ceremonia::text AS id, estado, fecha,
             max_invitados_por_graduando AS "maxInvitadosPorGraduando",
             cupo_invitados AS "cupoInvitados"
-     FROM public.sgme_ceremonia
-     WHERE id = $1
+     FROM public.ceremonia_grado
+     WHERE id_ceremonia = $1
      ${bloquear ? 'FOR UPDATE' : ''}`,
     [id],
   );
@@ -85,8 +95,8 @@ async function obtenerCeremonia(executor, id, bloquear = false) {
 async function validarSesionCeremonia(executor, ceremoniaId, sesionId) {
   const resultado = await executor.query(
     `SELECT 1
-     FROM public.sgme_ceremonia_sesion
-     WHERE id = $1 AND id_ceremonia = $2`,
+     FROM public.sesion
+     WHERE id_sesion = $1 AND id_ceremonia = $2`,
     [sesionId, ceremoniaId],
   );
   return resultado.rowCount > 0;
@@ -95,7 +105,7 @@ async function validarSesionCeremonia(executor, ceremoniaId, sesionId) {
 async function obtenerSesion(executor, id) {
   const resultado = await executor.query(
     `SELECT
-       s.id::text AS id,
+       s.id_sesion::text AS id,
        s.id_ceremonia::text AS "ceremoniaId",
        s.numero_sesion AS "numeroSesion",
        s.nombre,
@@ -113,17 +123,17 @@ async function obtenerSesion(executor, id) {
          ARRAY[]::integer[]
        ) AS "programaIds",
        (SELECT COUNT(*)::integer
-        FROM public.sgme_ceremonia_graduando g
-        WHERE g.id_sesion = s.id) AS "graduandosCount",
+        FROM public.graduando g
+        WHERE g.id_sesion = s.id_sesion) AS "graduandosCount",
        (SELECT COUNT(*)::integer
-        FROM public.sgme_ceremonia_invitado i
-        INNER JOIN public.sgme_ceremonia_graduando g ON g.id = i.id_graduando
-        WHERE g.id_sesion = s.id) AS "invitadosCount"
-     FROM public.sgme_ceremonia_sesion s
-     LEFT JOIN public.sgme_ceremonia_sesion_programa sp ON sp.id_sesion = s.id
+        FROM public.invitado i
+        INNER JOIN public.graduando g ON g.id_graduando = i.id_graduando
+        WHERE g.id_sesion = s.id_sesion) AS "invitadosCount"
+     FROM public.sesion s
+     LEFT JOIN public.sesion_programa sp ON sp.id_sesion = s.id_sesion
      LEFT JOIN public.programa p ON p.id_programa = sp.id_programa
-     WHERE s.id = $1
-     GROUP BY s.id`,
+     WHERE s.id_sesion = $1
+     GROUP BY s.id_sesion`,
     [id],
   );
   return resultado.rows[0] ?? null;
@@ -132,14 +142,14 @@ async function obtenerSesion(executor, id) {
 async function obtenerGraduando(executor, id) {
   const resultado = await executor.query(
     `SELECT
-       g.id::text AS id,
+       g.id_graduando::text AS id,
        g.id_ceremonia::text AS "ceremoniaId",
        g.id_sesion::text AS "sesionId",
        g.nombres,
        g.apellidos,
-       g.documento,
+       g.identificacion AS documento,
        g.telefono,
-       g.correo,
+       g.correo_electronico AS correo,
        g.codigo_estudiantil AS "codigoEstudiantil",
        g.talla_toga AS "tallaToga",
        COALESCE(
@@ -152,18 +162,31 @@ async function obtenerGraduando(executor, id) {
          ARRAY[]::integer[]
        ) AS "programaIds",
        s.nombre AS "sesionLabel",
-       COUNT(DISTINCT i.id)::integer AS "invitadosCount",
+       COUNT(DISTINCT i.id_invitado)::integer AS "invitadosCount",
        g.requisitos_cumplidos AS "requisitosCumplidos",
        g.estado,
-       CASE WHEN g.ingreso_at IS NULL THEN 'Pendiente' ELSE 'Ingresó' END AS "estadoIngreso",
-       TO_CHAR(g.ingreso_at, 'FMHH12:MI AM') AS "horaIngreso"
-     FROM public.sgme_ceremonia_graduando g
-     LEFT JOIN public.sgme_ceremonia_sesion s ON s.id = g.id_sesion
-     LEFT JOIN public.sgme_ceremonia_graduando_programa gp ON gp.id_graduando = g.id
+       CASE WHEN EXISTS (
+         SELECT 1 FROM public.control_ingreso ci
+         WHERE ci.id_graduando = g.id_graduando
+           AND ci.id_sesion = g.id_sesion
+           AND ci.ingreso = TRUE
+       ) THEN 'Ingresó' ELSE 'Pendiente' END AS "estadoIngreso",
+       (
+         SELECT TO_CHAR(ci.hora_ingreso, 'FMHH12:MI AM')
+         FROM public.control_ingreso ci
+         WHERE ci.id_graduando = g.id_graduando
+           AND ci.id_sesion = g.id_sesion
+           AND ci.ingreso = TRUE
+         ORDER BY ci.id_control_ingreso DESC
+         LIMIT 1
+       ) AS "horaIngreso"
+     FROM public.graduando g
+     LEFT JOIN public.sesion s ON s.id_sesion = g.id_sesion
+     LEFT JOIN public.graduando_programa gp ON gp.id_graduando = g.id_graduando
      LEFT JOIN public.programa p ON p.id_programa = gp.id_programa
-     LEFT JOIN public.sgme_ceremonia_invitado i ON i.id_graduando = g.id
-     WHERE g.id = $1
-     GROUP BY g.id, s.nombre`,
+     LEFT JOIN public.invitado i ON i.id_graduando = g.id_graduando
+     WHERE g.id_graduando = $1
+     GROUP BY g.id_graduando, s.nombre`,
     [id],
   );
   return resultado.rows[0] ?? null;
@@ -172,21 +195,34 @@ async function obtenerGraduando(executor, id) {
 async function obtenerInvitado(executor, id) {
   const resultado = await executor.query(
     `SELECT
-       i.id::text AS id,
+       i.id_invitado::text AS id,
        i.id_graduando::text AS "graduandoId",
-       i.id_ceremonia::text AS "ceremoniaId",
+       g.id_ceremonia::text AS "ceremoniaId",
        i.nombre,
-       COALESCE(i.documento, '') AS documento,
+       COALESCE(i.identificacion, '') AS documento,
        CONCAT_WS(' ', g.nombres, g.apellidos) AS "graduandoNombre",
        COALESCE(i.parentesco, 'Invitado') AS tipo,
        i.telefono,
        i.parentesco,
-       i.autorizacion,
-       CASE WHEN i.ingreso_at IS NULL THEN 'Pendiente' ELSE 'Ingresó' END AS "estadoIngreso",
-       TO_CHAR(i.ingreso_at, 'FMHH12:MI AM') AS "horaIngreso"
-     FROM public.sgme_ceremonia_invitado i
-     INNER JOIN public.sgme_ceremonia_graduando g ON g.id = i.id_graduando
-     WHERE i.id = $1`,
+       CASE WHEN i.autorizado THEN 'Autorizado' ELSE 'Pendiente' END AS autorizacion,
+       CASE WHEN EXISTS (
+         SELECT 1 FROM public.control_ingreso ci
+         WHERE ci.id_invitado = i.id_invitado
+           AND ci.id_sesion = g.id_sesion
+           AND ci.ingreso = TRUE
+       ) THEN 'Ingresó' ELSE 'Pendiente' END AS "estadoIngreso",
+       (
+         SELECT TO_CHAR(ci.hora_ingreso, 'FMHH12:MI AM')
+         FROM public.control_ingreso ci
+         WHERE ci.id_invitado = i.id_invitado
+           AND ci.id_sesion = g.id_sesion
+           AND ci.ingreso = TRUE
+         ORDER BY ci.id_control_ingreso DESC
+         LIMIT 1
+       ) AS "horaIngreso"
+     FROM public.invitado i
+     INNER JOIN public.graduando g ON g.id_graduando = i.id_graduando
+     WHERE i.id_invitado = $1`,
     [id],
   );
   return resultado.rows[0] ?? null;
@@ -215,14 +251,18 @@ async function validarProgramas(executor, programaIds) {
 
 async function validarSesionParaGraduando(executor, ceremoniaId, sesionId, programaIds) {
   if (sesionId === null) return;
-  if (typeof sesionId !== 'string' || !UUID_REGEX.test(sesionId)) {
+  if (
+    typeof sesionId !== 'string'
+    || !ID_INTEGER_REGEX.test(sesionId)
+    || !Number.isSafeInteger(Number(sesionId))
+  ) {
     throw errorHttp(400, 'La sesión seleccionada no es válida.');
   }
   const resultado = await executor.query(
     `SELECT 1
-     FROM public.sgme_ceremonia_sesion s
-     INNER JOIN public.sgme_ceremonia_sesion_programa sp ON sp.id_sesion = s.id
-     WHERE s.id = $1
+     FROM public.sesion s
+     INNER JOIN public.sesion_programa sp ON sp.id_sesion = s.id_sesion
+     WHERE s.id_sesion = $1
        AND s.id_ceremonia = $2
        AND sp.id_programa = ANY($3::integer[])
      LIMIT 1`,
@@ -236,7 +276,14 @@ async function validarSesionParaGraduando(executor, ceremoniaId, sesionId, progr
 function validarDatosGraduando(body) {
   const idSesionRecibido = body.idSesion ?? body.id_sesion ?? null;
   const idSesion = idSesionRecibido === '' ? null : idSesionRecibido;
-  if (idSesion !== null && (typeof idSesion !== 'string' || !UUID_REGEX.test(idSesion))) {
+  if (
+    idSesion !== null
+    && (
+      typeof idSesion !== 'string'
+      || !ID_INTEGER_REGEX.test(idSesion)
+      || !Number.isSafeInteger(Number(idSesion))
+    )
+  ) {
     throw errorHttp(400, 'La sesión seleccionada no es válida.');
   }
   return {
@@ -260,12 +307,12 @@ async function documentoExiste(executor, ceremoniaId, documento, excluirId = nul
   const canonico = documentoCanonico(documento);
   const resultado = await executor.query(
     `SELECT 1
-     FROM public.sgme_ceremonia_graduando
+     FROM public.graduando
      WHERE id_ceremonia = $1
-       AND ($3::uuid IS NULL OR id <> $3::uuid)
+       AND ($3::integer IS NULL OR id_graduando <> $3::integer)
        AND COALESCE(
-         NULLIF(REGEXP_REPLACE(documento, '[^0-9]', '', 'g'), ''),
-         LOWER(BTRIM(documento))
+         NULLIF(REGEXP_REPLACE(identificacion, '[^0-9]', '', 'g'), ''),
+         LOWER(BTRIM(identificacion))
        ) = $2
      LIMIT 1`,
     [ceremoniaId, canonico, excluirId],
@@ -316,11 +363,7 @@ export async function crearSesion(req, res) {
   let transaccion = false;
   try {
     validarId(req.params.id, 'ceremonia');
-    const nombre = texto(req.body?.nombre, 180, 'El nombre de la sesión', true);
-    const estado = req.body?.estado ?? 'Pendiente';
-    if (!ESTADOS_SESION.has(estado)) {
-      throw errorHttp(400, 'El estado de la sesión no es válido.');
-    }
+    const nombreSolicitado = texto(req.body?.nombre, 180, 'El nombre de la sesión');
     const { horaInicio, horaFin } = validarHorario(req.body ?? {});
 
     client = await pool.connect();
@@ -331,21 +374,22 @@ export async function crearSesion(req, res) {
 
     const numero = await client.query(
       `SELECT COALESCE(MAX(numero_sesion), 0)::integer + 1 AS numero
-       FROM public.sgme_ceremonia_sesion
+       FROM public.sesion
        WHERE id_ceremonia = $1`,
       [req.params.id],
     );
-    const id = randomUUID();
-    await client.query(
-      `INSERT INTO public.sgme_ceremonia_sesion (
-         id, id_ceremonia, numero_sesion, nombre, estado, hora_inicio, hora_fin
+    const nombre = nombreSolicitado || `Sesión ${numero.rows[0].numero}`;
+    const insertado = await client.query(
+      `INSERT INTO public.sesion (
+         id_ceremonia, numero_sesion, nombre, estado, hora_inicio, hora_fin
        )
-       VALUES ($1, $2, $3, $4, $5, $6::time, $7::time)`,
-      [id, req.params.id, numero.rows[0].numero, nombre, estado, horaInicio, horaFin],
+       VALUES ($1, $2, $3, 'Pendiente', $4::time, $5::time)
+       RETURNING id_sesion::text AS id`,
+      [req.params.id, numero.rows[0].numero, nombre, horaInicio, horaFin],
     );
     await client.query('COMMIT');
     transaccion = false;
-    return res.status(201).json(await obtenerSesion(pool, id));
+    return res.status(201).json(await obtenerSesion(pool, insertado.rows[0].id));
   } catch (error) {
     if (transaccion) await client.query('ROLLBACK');
     return responderError(res, error, 'No fue posible crear la sesión.');
@@ -360,29 +404,48 @@ export async function actualizarSesion(req, res) {
   try {
     validarId(req.params.id, 'sesión');
     const nombre = texto(req.body?.nombre, 180, 'El nombre de la sesión', true);
-    const estado = req.body?.estado;
-    if (!ESTADOS_SESION.has(estado)) {
+    const estadoSolicitado = req.body?.estado;
+    if (!ESTADOS_SESION_CONFIGURABLES.has(estadoSolicitado)) {
       throw errorHttp(400, 'El estado de la sesión no es válido.');
     }
     const { horaInicio, horaFin } = validarHorario(req.body ?? {});
+    if (!horaInicio || !horaFin) {
+      throw errorHttp(400, 'Configura una hora de inicio y finalización para la sesión.');
+    }
 
     client = await pool.connect();
     await client.query('BEGIN');
     transaccion = true;
     const sesionResultado = await client.query(
-      `SELECT id::text AS id, id_ceremonia::text AS "ceremoniaId"
-       FROM public.sgme_ceremonia_sesion
-       WHERE id = $1
+      `SELECT id_sesion::text AS id, id_ceremonia::text AS "ceremoniaId", estado
+       FROM public.sesion
+       WHERE id_sesion = $1
        FOR UPDATE`,
       [req.params.id],
     );
     const sesionActual = sesionResultado.rows[0];
     if (!sesionActual) throw errorHttp(404, 'La sesión no existe.');
+    const ceremonia = await obtenerCeremonia(client, sesionActual.ceremoniaId);
+    if (!ceremonia) throw errorHttp(404, 'La ceremonia de la sesión no existe.');
+
+    let estado = estadoSolicitado;
+    if (estadoSolicitado === 'Programada') {
+      const estadoPorHorario = await client.query(
+        `SELECT CASE
+           WHEN $1::time IS NULL OR $2::time IS NULL THEN 'Programada'
+           WHEN $3::date + $2::time <= LOCALTIMESTAMP THEN 'Finalizada'
+           WHEN $3::date + $1::time <= LOCALTIMESTAMP THEN 'En curso'
+           ELSE 'Programada'
+         END AS estado`,
+        [horaInicio, horaFin, ceremonia.fecha],
+      );
+      estado = estadoPorHorario.rows[0].estado;
+    }
 
     const programaIds = await resolverProgramasPorNombre(client, req.body?.programas);
     if (programaIds.length === 0) {
       const graduandosAsignados = await client.query(
-        'SELECT 1 FROM public.sgme_ceremonia_graduando WHERE id_sesion = $1 LIMIT 1',
+        'SELECT 1 FROM public.graduando WHERE id_sesion = $1 LIMIT 1',
         [req.params.id],
       );
       if (graduandosAsignados.rowCount > 0) {
@@ -391,8 +454,8 @@ export async function actualizarSesion(req, res) {
     } else {
       const incompatibles = await client.query(
         `SELECT 1
-         FROM public.sgme_ceremonia_graduando g
-         INNER JOIN public.sgme_ceremonia_graduando_programa gp ON gp.id_graduando = g.id
+         FROM public.graduando g
+         INNER JOIN public.graduando_programa gp ON gp.id_graduando = g.id_graduando
          WHERE g.id_sesion = $1
            AND NOT (gp.id_programa = ANY($2::integer[]))
          LIMIT 1`,
@@ -404,26 +467,43 @@ export async function actualizarSesion(req, res) {
     }
 
     await client.query(
-      `UPDATE public.sgme_ceremonia_sesion
-       SET nombre = $2, estado = $3, hora_inicio = $4::time, hora_fin = $5::time,
-           updated_at = NOW()
-       WHERE id = $1`,
+      `UPDATE public.sesion
+      SET nombre = $2, estado = $3, hora_inicio = $4::time, hora_fin = $5::time
+      WHERE id_sesion = $1`,
       [req.params.id, nombre, estado, horaInicio, horaFin],
     );
     await client.query(
-      'DELETE FROM public.sgme_ceremonia_sesion_programa WHERE id_sesion = $1',
+      'DELETE FROM public.sesion_programa WHERE id_sesion = $1',
       [req.params.id],
     );
     for (const programaId of programaIds) {
       await client.query(
-        `INSERT INTO public.sgme_ceremonia_sesion_programa (id_sesion, id_programa)
+        `INSERT INTO public.sesion_programa (id_sesion, id_programa)
          VALUES ($1, $2)`,
         [req.params.id, programaId],
       );
     }
+    const asignacionAutomatica = await client.query(
+      `UPDATE public.graduando g
+       SET id_sesion = $1
+       WHERE g.id_ceremonia = $2
+         AND g.id_sesion IS NULL
+         AND EXISTS (
+           SELECT 1
+           FROM public.graduando_programa gp
+           WHERE gp.id_graduando = g.id_graduando
+             AND gp.id_programa = ANY($3::integer[])
+         )
+       RETURNING g.id_graduando`,
+      [req.params.id, sesionActual.ceremoniaId, programaIds],
+    );
     await client.query('COMMIT');
     transaccion = false;
-    return res.json(await obtenerSesion(pool, req.params.id));
+    const sesionActualizada = await obtenerSesion(pool, req.params.id);
+    return res.json({
+      ...sesionActualizada,
+      graduandosAsignados: asignacionAutomatica.rowCount,
+    });
   } catch (error) {
     if (transaccion) await client.query('ROLLBACK');
     return responderError(res, error, 'No fue posible actualizar la sesión.');
@@ -437,13 +517,10 @@ export async function actualizarEstadoCeremonia(req, res) {
   let transaccion = false;
   try {
     validarId(req.params.id, 'ceremonia');
-    const { estado, motivo } = req.body ?? {};
+    const { estado } = req.body ?? {};
     if (!ESTADOS_CEREMONIA.has(estado)) {
       throw errorHttp(400, 'El estado de la ceremonia no es válido.');
     }
-    const motivoNormalizado = motivo === undefined
-      ? null
-      : texto(motivo, 500, 'El motivo');
 
     client = await pool.connect();
     await client.query('BEGIN');
@@ -451,18 +528,27 @@ export async function actualizarEstadoCeremonia(req, res) {
     const ceremonia = await obtenerCeremonia(client, req.params.id, true);
     if (!ceremonia) throw errorHttp(404, 'La ceremonia no existe.');
     await client.query(
-      `UPDATE public.sgme_ceremonia
-       SET estado = $2,
-           motivo_estado = COALESCE($3, motivo_estado),
-           updated_at = NOW()
-       WHERE id = $1`,
-      [req.params.id, estado, motivoNormalizado],
+      `UPDATE public.ceremonia_grado
+       SET estado = $2
+       WHERE id_ceremonia = $1`,
+      [req.params.id, estado],
     );
+    let sesionesIniciadas = [];
     let sesionesFinalizadas = 0;
+    if (estado === 'En curso') {
+      const resultado = await client.query(
+        `UPDATE public.sesion
+         SET estado = 'En curso'
+         WHERE id_ceremonia = $1 AND estado = 'Programada'
+         RETURNING id_sesion::text AS id`,
+        [req.params.id],
+      );
+      sesionesIniciadas = resultado.rows.map((sesion) => sesion.id);
+    }
     if (estado === 'Finalizada') {
       const resultado = await client.query(
-        `UPDATE public.sgme_ceremonia_sesion
-         SET estado = 'Finalizada', updated_at = NOW()
+        `UPDATE public.sesion
+         SET estado = 'Finalizada'
          WHERE id_ceremonia = $1 AND estado <> 'Finalizada'`,
         [req.params.id],
       );
@@ -470,7 +556,7 @@ export async function actualizarEstadoCeremonia(req, res) {
     }
     await client.query('COMMIT');
     transaccion = false;
-    return res.json({ id: req.params.id, estado, sesionesFinalizadas });
+    return res.json({ id: req.params.id, estado, sesionesIniciadas, sesionesFinalizadas });
   } catch (error) {
     if (transaccion) await client.query('ROLLBACK');
     return responderError(res, error, 'No fue posible cambiar el estado de la ceremonia.');
@@ -487,10 +573,10 @@ export async function actualizarMaxInvitadosPorGraduando(req, res) {
       throw errorHttp(400, 'El máximo de invitados por graduando debe ser 2, 3 o 4.');
     }
     const resultado = await pool.query(
-      `UPDATE public.sgme_ceremonia
-       SET max_invitados_por_graduando = $2, updated_at = NOW()
-       WHERE id = $1
-       RETURNING id::text AS id, max_invitados_por_graduando AS "maxInvitadosPorGraduando"`,
+      `UPDATE public.ceremonia_grado
+       SET max_invitados_por_graduando = $2
+       WHERE id_ceremonia = $1
+       RETURNING id_ceremonia::text AS id, max_invitados_por_graduando AS "maxInvitadosPorGraduando"`,
       [req.params.id, limite],
     );
     if (resultado.rowCount === 0) return res.status(404).json({ mensaje: 'La ceremonia no existe.' });
@@ -508,17 +594,18 @@ export async function actualizarCupoInvitados(req, res) {
       throw errorHttp(400, 'El cupo de invitados debe ser un número entero igual o mayor que cero.');
     }
     const resultado = await pool.query(
-      `UPDATE public.sgme_ceremonia
-       SET cupo_invitados = $2, updated_at = NOW()
-       WHERE id = $1
-       RETURNING id::text AS id, cupo_invitados AS "cupoInvitados"`,
+      `UPDATE public.ceremonia_grado
+       SET cupo_invitados = $2
+       WHERE id_ceremonia = $1
+       RETURNING id_ceremonia::text AS id, cupo_invitados AS "cupoInvitados"`,
       [req.params.id, cupo],
     );
     if (resultado.rowCount === 0) return res.status(404).json({ mensaje: 'La ceremonia no existe.' });
     const conteo = await pool.query(
       `SELECT COUNT(*)::integer AS "invitadosRegistrados"
-       FROM public.sgme_ceremonia_invitado
-       WHERE id_ceremonia = $1`,
+       FROM public.invitado i
+       INNER JOIN public.graduando g ON g.id_graduando = i.id_graduando
+       WHERE g.id_ceremonia = $1`,
       [req.params.id],
     );
     const invitadosRegistrados = conteo.rows[0].invitadosRegistrados;
@@ -563,23 +650,24 @@ export async function crearGraduando(req, res) {
       throw errorHttp(409, 'Ya existe un graduando con ese documento en esta ceremonia.');
     }
 
-    const id = randomUUID();
-    await client.query(
-      `INSERT INTO public.sgme_ceremonia_graduando (
-         id, id_ceremonia, id_sesion, nombres, apellidos, documento, telefono,
-         correo, codigo_estudiantil, talla_toga, estado, requisitos_cumplidos
+    const insertado = await client.query(
+      `INSERT INTO public.graduando (
+         id_ceremonia, id_sesion, nombres, apellidos, identificacion, telefono,
+         correo_electronico, codigo_estudiantil, talla_toga, estado, requisitos_cumplidos
        )
-       VALUES ($1, $2, $3, $4, $5, $6, NULLIF($7, ''), NULLIF($8, ''),
-               NULLIF($9, ''), NULLIF($10, ''), $11, $12)`,
+       VALUES ($1, $2, $3, $4, $5, NULLIF($6, ''), NULLIF($7, ''),
+               NULLIF($8, ''), NULLIF($9, ''), $10, $11)
+       RETURNING id_graduando::text AS id`,
       [
-        id, req.params.id, datos.idSesion, datos.nombres, datos.apellidos,
+        req.params.id, datos.idSesion, datos.nombres, datos.apellidos,
         datos.documento, datos.telefono, datos.correo, datos.codigoEstudiantil,
         datos.tallaToga, datos.estado, datos.requisitosCumplidos,
       ],
     );
+    const id = insertado.rows[0].id;
     for (const programaId of programaIds) {
       await client.query(
-        `INSERT INTO public.sgme_ceremonia_graduando_programa (id_graduando, id_programa)
+        `INSERT INTO public.graduando_programa (id_graduando, id_programa)
          VALUES ($1, $2)`,
         [id, programaId],
       );
@@ -608,9 +696,9 @@ export async function actualizarGraduando(req, res) {
     await client.query('BEGIN');
     transaccion = true;
     const graduandoResultado = await client.query(
-      `SELECT id::text AS id, id_ceremonia::text AS "ceremoniaId"
-       FROM public.sgme_ceremonia_graduando
-       WHERE id = $1
+      `SELECT id_graduando::text AS id, id_ceremonia::text AS "ceremoniaId"
+       FROM public.graduando
+       WHERE id_graduando = $1
        FOR UPDATE`,
       [req.params.id],
     );
@@ -634,12 +722,12 @@ export async function actualizarGraduando(req, res) {
     }
 
     await client.query(
-      `UPDATE public.sgme_ceremonia_graduando
-       SET id_sesion = $2, nombres = $3, apellidos = $4, documento = $5,
-           telefono = NULLIF($6, ''), correo = NULLIF($7, ''),
+      `UPDATE public.graduando
+       SET id_sesion = $2, nombres = $3, apellidos = $4, identificacion = $5,
+           telefono = NULLIF($6, ''), correo_electronico = NULLIF($7, ''),
            codigo_estudiantil = NULLIF($8, ''), talla_toga = NULLIF($9, ''),
-           estado = $10, requisitos_cumplidos = $11, updated_at = NOW()
-       WHERE id = $1`,
+           estado = $10, requisitos_cumplidos = $11
+       WHERE id_graduando = $1`,
       [
         req.params.id, datos.idSesion, datos.nombres, datos.apellidos,
         datos.documento, datos.telefono, datos.correo, datos.codigoEstudiantil,
@@ -647,12 +735,12 @@ export async function actualizarGraduando(req, res) {
       ],
     );
     await client.query(
-      'DELETE FROM public.sgme_ceremonia_graduando_programa WHERE id_graduando = $1',
+      'DELETE FROM public.graduando_programa WHERE id_graduando = $1',
       [req.params.id],
     );
     for (const programaId of programaIds) {
       await client.query(
-        `INSERT INTO public.sgme_ceremonia_graduando_programa (id_graduando, id_programa)
+        `INSERT INTO public.graduando_programa (id_graduando, id_programa)
          VALUES ($1, $2)`,
         [req.params.id, programaId],
       );
@@ -672,12 +760,12 @@ export async function obtenerGraduandoPorDocumento(req, res) {
   try {
     const documento = texto(req.params.documento, 40, 'El documento', true);
     const resultado = await pool.query(
-      `SELECT g.id::text AS id
-       FROM public.sgme_ceremonia_graduando g
-       INNER JOIN public.sgme_ceremonia c ON c.id = g.id_ceremonia
+      `SELECT g.id_graduando::text AS id
+       FROM public.graduando g
+       INNER JOIN public.ceremonia_grado c ON c.id_ceremonia = g.id_ceremonia
        WHERE COALESCE(
-         NULLIF(REGEXP_REPLACE(g.documento, '[^0-9]', '', 'g'), ''),
-         LOWER(BTRIM(g.documento))
+         NULLIF(REGEXP_REPLACE(g.identificacion, '[^0-9]', '', 'g'), ''),
+         LOWER(BTRIM(g.identificacion))
        ) = $1
          AND c.estado NOT IN ('Finalizada', 'Cancelada')
        ORDER BY c.fecha DESC
@@ -713,16 +801,16 @@ async function validarFilasImportacion(executor, ceremoniaId, filas) {
     ]),
   );
   const sesiones = await executor.query(
-    `SELECT s.numero_sesion, s.id::text AS id,
+    `SELECT s.numero_sesion, s.id_sesion::text AS id,
             COALESCE(
               ARRAY_AGG(sp.id_programa)
                 FILTER (WHERE sp.id_programa IS NOT NULL),
               ARRAY[]::integer[]
             ) AS "programaIds"
-     FROM public.sgme_ceremonia_sesion s
-     LEFT JOIN public.sgme_ceremonia_sesion_programa sp ON sp.id_sesion = s.id
+     FROM public.sesion s
+     LEFT JOIN public.sesion_programa sp ON sp.id_sesion = s.id_sesion
      WHERE s.id_ceremonia = $1
-     GROUP BY s.id`,
+     GROUP BY s.id_sesion`,
     [ceremoniaId],
   );
   const sesionesPorNumero = new Map(
@@ -730,10 +818,10 @@ async function validarFilasImportacion(executor, ceremoniaId, filas) {
   );
   const existentes = await executor.query(
     `SELECT DISTINCT COALESCE(
-       NULLIF(REGEXP_REPLACE(documento, '[^0-9]', '', 'g'), ''),
-       LOWER(BTRIM(documento))
+       NULLIF(REGEXP_REPLACE(identificacion, '[^0-9]', '', 'g'), ''),
+       LOWER(BTRIM(identificacion))
      ) AS documento
-     FROM public.sgme_ceremonia_graduando
+     FROM public.graduando
      WHERE id_ceremonia = $1`,
     [ceremoniaId],
   );
@@ -844,22 +932,23 @@ export async function confirmarImportacionGraduandos(req, res) {
     const validacion = await validarFilasImportacion(client, req.params.id, req.body?.filas);
     let importados = 0;
     for (const fila of validacion.validas) {
-      const graduandoId = randomUUID();
-      await client.query(
-        `INSERT INTO public.sgme_ceremonia_graduando (
-           id, id_ceremonia, id_sesion, nombres, apellidos, documento, telefono,
-           correo, codigo_estudiantil, talla_toga
+      const resultado = await client.query(
+        `INSERT INTO public.graduando (
+           id_ceremonia, id_sesion, nombres, apellidos, identificacion, telefono,
+           correo_electronico, codigo_estudiantil, talla_toga
          )
-         VALUES ($1, $2, $3, $4, $5, $6, NULLIF($7, ''), NULLIF($8, ''),
-                 NULLIF($9, ''), NULLIF($10, ''))`,
+         VALUES ($1, $2, $3, $4, $5, NULLIF($6, ''), NULLIF($7, ''),
+                 NULLIF($8, ''), NULLIF($9, ''))
+         RETURNING id_graduando::text AS id`,
         [
-          graduandoId, req.params.id, fila.idSesion, fila.nombres, fila.apellidos,
+          req.params.id, fila.idSesion, fila.nombres, fila.apellidos,
           fila.documento, fila.telefono, fila.correo, fila.codigoEstudiantil,
           fila.tallaToga,
         ],
       );
+      const graduandoId = resultado.rows[0].id;
       await client.query(
-        `INSERT INTO public.sgme_ceremonia_graduando_programa (id_graduando, id_programa)
+        `INSERT INTO public.graduando_programa (id_graduando, id_programa)
          VALUES ($1, $2)`,
         [graduandoId, fila.programaId],
       );
@@ -888,21 +977,34 @@ async function obtenerInvitados(executor, ceremoniaId, graduandoId = null) {
   if (graduandoId) valores.push(graduandoId);
   const resultado = await executor.query(
     `SELECT
-       i.id::text AS id,
+       i.id_invitado::text AS id,
        i.id_graduando::text AS "graduandoId",
-       i.id_ceremonia::text AS "ceremoniaId",
+       g.id_ceremonia::text AS "ceremoniaId",
        i.nombre,
-       COALESCE(i.documento, '') AS documento,
+       COALESCE(i.identificacion, '') AS documento,
        CONCAT_WS(' ', g.nombres, g.apellidos) AS "graduandoNombre",
        COALESCE(i.parentesco, 'Invitado') AS tipo,
        i.telefono,
        i.parentesco,
-       i.autorizacion,
-       CASE WHEN i.ingreso_at IS NULL THEN 'Pendiente' ELSE 'Ingresó' END AS "estadoIngreso",
-       TO_CHAR(i.ingreso_at, 'FMHH12:MI AM') AS "horaIngreso"
-     FROM public.sgme_ceremonia_invitado i
-     INNER JOIN public.sgme_ceremonia_graduando g ON g.id = i.id_graduando
-     WHERE i.id_ceremonia = $1 ${condicionGraduando}
+       CASE WHEN i.autorizado THEN 'Autorizado' ELSE 'Pendiente' END AS autorizacion,
+       CASE WHEN EXISTS (
+         SELECT 1 FROM public.control_ingreso ci
+         WHERE ci.id_invitado = i.id_invitado
+           AND ci.id_sesion = g.id_sesion
+           AND ci.ingreso = TRUE
+       ) THEN 'Ingresó' ELSE 'Pendiente' END AS "estadoIngreso",
+       (
+         SELECT TO_CHAR(ci.hora_ingreso, 'FMHH12:MI AM')
+         FROM public.control_ingreso ci
+         WHERE ci.id_invitado = i.id_invitado
+           AND ci.id_sesion = g.id_sesion
+           AND ci.ingreso = TRUE
+         ORDER BY ci.id_control_ingreso DESC
+         LIMIT 1
+       ) AS "horaIngreso"
+     FROM public.invitado i
+     INNER JOIN public.graduando g ON g.id_graduando = i.id_graduando
+     WHERE g.id_ceremonia = $1 ${condicionGraduando}
      ORDER BY g.apellidos, g.nombres, i.nombre`,
     valores,
   );
@@ -919,7 +1021,7 @@ export async function listarInvitadosCeremonia(req, res) {
       graduandoId = req.query.graduandoId;
       validarId(graduandoId, 'graduando');
       const graduando = await pool.query(
-        'SELECT 1 FROM public.sgme_ceremonia_graduando WHERE id = $1 AND id_ceremonia = $2',
+        'SELECT 1 FROM public.graduando WHERE id_graduando = $1 AND id_ceremonia = $2',
         [graduandoId, req.params.id],
       );
       if (graduando.rowCount === 0) {
@@ -937,9 +1039,13 @@ function validarDatosInvitado(body) {
   if (!ESTADOS_AUTORIZACION.has(autorizacion)) {
     throw errorHttp(400, 'El estado de autorización del invitado no es válido.');
   }
+  const documento = texto(body.documento, 40, 'El documento');
+  if (documento && !/^\d+$/.test(documento)) {
+    throw errorHttp(400, 'El documento del invitado debe contener solo dígitos.');
+  }
   return {
     nombre: texto(body.nombre, 180, 'El nombre del invitado', true),
-    documento: texto(body.documento, 40, 'El documento'),
+    documento,
     telefono: texto(body.telefono, 40, 'El teléfono'),
     parentesco: texto(body.parentesco ?? body.tipo, 80, 'El parentesco o tipo'),
     autorizacion,
@@ -950,11 +1056,11 @@ async function crearInvitado(client, ceremoniaId, graduandoId, datos) {
   if (datos.documento) {
     const duplicado = await client.query(
       `SELECT 1
-       FROM public.sgme_ceremonia_invitado
+       FROM public.invitado
        WHERE id_graduando = $1
          AND COALESCE(
-           NULLIF(REGEXP_REPLACE(documento, '[^0-9]', '', 'g'), ''),
-           LOWER(BTRIM(documento))
+           NULLIF(REGEXP_REPLACE(identificacion, '[^0-9]', '', 'g'), ''),
+           LOWER(BTRIM(identificacion))
          ) = $2
        LIMIT 1`,
       [graduandoId, documentoCanonico(datos.documento)],
@@ -963,18 +1069,18 @@ async function crearInvitado(client, ceremoniaId, graduandoId, datos) {
       throw errorHttp(409, 'El documento ya está registrado para este graduando.');
     }
   }
-  const id = randomUUID();
-  await client.query(
-    `INSERT INTO public.sgme_ceremonia_invitado (
-       id, id_ceremonia, id_graduando, nombre, documento, telefono, parentesco, autorizacion
+  const resultado = await client.query(
+    `INSERT INTO public.invitado (
+       id_graduando, nombre, identificacion, telefono, parentesco, autorizado
      )
-     VALUES ($1, $2, $3, $4, NULLIF($5, ''), NULLIF($6, ''), NULLIF($7, ''), $8)`,
+     VALUES ($1, $2, NULLIF($3, ''), NULLIF($4, ''), NULLIF($5, ''), $6)
+     RETURNING id_invitado::text AS id`,
     [
-      id, ceremoniaId, graduandoId, datos.nombre, datos.documento,
-      datos.telefono, datos.parentesco, datos.autorizacion,
+      graduandoId, datos.nombre, datos.documento, datos.telefono,
+      datos.parentesco, datos.autorizacion === 'Autorizado',
     ],
   );
-  return id;
+  return resultado.rows[0].id;
 }
 
 async function validarCupoInvitados(client, ceremoniaId, graduandoId, cantidadNueva) {
@@ -983,11 +1089,12 @@ async function validarCupoInvitados(client, ceremoniaId, graduandoId, cantidadNu
   const conteos = await client.query(
     `SELECT
        (SELECT COUNT(*)::integer
-        FROM public.sgme_ceremonia_invitado
+        FROM public.invitado
         WHERE id_graduando = $2) AS "invitadosGraduando",
        (SELECT COUNT(*)::integer
-        FROM public.sgme_ceremonia_invitado
-        WHERE id_ceremonia = $1) AS "invitadosCeremonia"`,
+        FROM public.invitado i
+        INNER JOIN public.graduando g ON g.id_graduando = i.id_graduando
+        WHERE g.id_ceremonia = $1) AS "invitadosCeremonia"`,
     [ceremoniaId, graduandoId],
   );
   const { invitadosGraduando, invitadosCeremonia } = conteos.rows[0];
@@ -1015,9 +1122,9 @@ export async function agregarInvitado(req, res) {
     await client.query('BEGIN');
     transaccion = true;
     const graduando = await client.query(
-      `SELECT id::text AS id, id_ceremonia::text AS "ceremoniaId"
-       FROM public.sgme_ceremonia_graduando
-       WHERE id = $1
+      `SELECT id_graduando::text AS id, id_ceremonia::text AS "ceremoniaId"
+       FROM public.graduando
+       WHERE id_graduando = $1
        FOR UPDATE`,
       [req.params.id],
     );
@@ -1056,9 +1163,9 @@ export async function agregarInvitadosLote(req, res) {
     await client.query('BEGIN');
     transaccion = true;
     const graduando = await client.query(
-      `SELECT id::text AS id, id_ceremonia::text AS "ceremoniaId"
-       FROM public.sgme_ceremonia_graduando
-       WHERE id = $1
+      `SELECT id_graduando::text AS id, id_ceremonia::text AS "ceremoniaId"
+       FROM public.graduando
+       WHERE id_graduando = $1
        FOR UPDATE`,
       [req.params.id],
     );
@@ -1089,14 +1196,14 @@ export async function actualizarInvitado(req, res) {
     if (datos.documento) {
       const duplicado = await pool.query(
         `SELECT 1
-         FROM public.sgme_ceremonia_invitado actual
-         INNER JOIN public.sgme_ceremonia_invitado otro
+         FROM public.invitado actual
+         INNER JOIN public.invitado otro
            ON otro.id_graduando = actual.id_graduando
-          AND otro.id <> actual.id
-         WHERE actual.id = $1
+          AND otro.id_invitado <> actual.id_invitado
+         WHERE actual.id_invitado = $1
            AND COALESCE(
-             NULLIF(REGEXP_REPLACE(otro.documento, '[^0-9]', '', 'g'), ''),
-             LOWER(BTRIM(otro.documento))
+             NULLIF(REGEXP_REPLACE(otro.identificacion, '[^0-9]', '', 'g'), ''),
+             LOWER(BTRIM(otro.identificacion))
            ) = $2
          LIMIT 1`,
         [req.params.id, documentoCanonico(datos.documento)],
@@ -1106,13 +1213,13 @@ export async function actualizarInvitado(req, res) {
       }
     }
     const resultado = await pool.query(
-      `UPDATE public.sgme_ceremonia_invitado
-       SET nombre = $2, documento = NULLIF($3, ''), telefono = NULLIF($4, ''),
-           parentesco = NULLIF($5, ''), autorizacion = $6, updated_at = NOW()
-       WHERE id = $1`,
+      `UPDATE public.invitado
+       SET nombre = $2, identificacion = NULLIF($3, ''), telefono = NULLIF($4, ''),
+           parentesco = NULLIF($5, ''), autorizado = $6
+       WHERE id_invitado = $1`,
       [
         req.params.id, datos.nombre, datos.documento, datos.telefono,
-        datos.parentesco, datos.autorizacion,
+        datos.parentesco, datos.autorizacion === 'Autorizado',
       ],
     );
     if (resultado.rowCount === 0) return res.status(404).json({ mensaje: 'El invitado no existe.' });
@@ -1144,23 +1251,35 @@ async function obtenerEstadisticasControl(executor, ceremoniaId, sesionId) {
     executor.query(
       `SELECT COUNT(*)::integer AS registrados,
               COUNT(*) FILTER (
-                WHERE ingreso_at IS NOT NULL AND ingreso_sesion_id = $2
+                WHERE EXISTS (
+                  SELECT 1
+                  FROM public.control_ingreso ci
+                  WHERE ci.id_graduando = g.id_graduando
+                    AND ci.id_sesion = $2
+                    AND ci.ingreso = TRUE
+                )
               )::integer AS ingresaron
-       FROM public.sgme_ceremonia_graduando
+       FROM public.graduando g
        WHERE id_ceremonia = $1 AND id_sesion = $2 AND estado = TRUE`,
       [ceremoniaId, sesionId],
     ),
     executor.query(
       `SELECT COUNT(*)::integer AS registrados,
               COUNT(*) FILTER (
-                WHERE i.ingreso_at IS NOT NULL AND i.ingreso_sesion_id = $2
+                WHERE EXISTS (
+                  SELECT 1
+                  FROM public.control_ingreso ci
+                  WHERE ci.id_invitado = i.id_invitado
+                    AND ci.id_sesion = $2
+                    AND ci.ingreso = TRUE
+                )
               )::integer AS ingresaron
-       FROM public.sgme_ceremonia_invitado i
-       INNER JOIN public.sgme_ceremonia_graduando g ON g.id = i.id_graduando
-       WHERE i.id_ceremonia = $1
+       FROM public.invitado i
+       INNER JOIN public.graduando g ON g.id_graduando = i.id_graduando
+       WHERE g.id_ceremonia = $1
          AND g.id_sesion = $2
          AND g.estado = TRUE
-         AND i.autorizacion = 'Autorizado'`,
+         AND i.autorizado = TRUE`,
       [ceremoniaId, sesionId],
     ),
   ]);
@@ -1192,8 +1311,8 @@ export async function buscarGraduandosControlIngreso(req, res) {
   if (!search) return res.status(400).json({ mensaje: 'Ingresa un nombre o documento para buscar.' });
   try {
     const resultado = await pool.query(
-      `SELECT g.id::text AS id
-       FROM public.sgme_ceremonia_graduando g
+      `SELECT g.id_graduando::text AS id
+       FROM public.graduando g
        WHERE g.id_ceremonia = $1
          AND g.id_sesion = $2
          AND g.estado = TRUE
@@ -1201,7 +1320,7 @@ export async function buscarGraduandosControlIngreso(req, res) {
            g.nombres ILIKE $3
            OR g.apellidos ILIKE $3
            OR CONCAT_WS(' ', g.nombres, g.apellidos) ILIKE $3
-           OR g.documento ILIKE $3
+           OR g.identificacion ILIKE $3
          )
        ORDER BY g.apellidos, g.nombres
        LIMIT 50`,
@@ -1217,6 +1336,60 @@ export async function buscarGraduandosControlIngreso(req, res) {
   }
 }
 
+export async function buscarInvitadosControlIngreso(req, res) {
+  const sesionId = await validarSesionControl(req, res);
+  if (!sesionId) return;
+  const search = typeof req.query.search === 'string' ? req.query.search.trim() : '';
+  if (!search) return res.status(400).json({ mensaje: 'Ingresa un nombre o documento para buscar.' });
+  try {
+    const resultado = await pool.query(
+      `SELECT
+         i.id_invitado::text AS id,
+         i.id_graduando::text AS "graduandoId",
+         g.id_ceremonia::text AS "ceremoniaId",
+         i.nombre,
+         COALESCE(i.identificacion, '') AS documento,
+         CONCAT_WS(' ', g.nombres, g.apellidos) AS "graduandoNombre",
+         COALESCE(i.parentesco, 'Invitado') AS tipo,
+         i.telefono,
+         i.parentesco,
+         CASE WHEN i.autorizado THEN 'Autorizado' ELSE 'Pendiente' END AS autorizacion,
+         CASE WHEN EXISTS (
+           SELECT 1
+           FROM public.control_ingreso ci
+           WHERE ci.id_invitado = i.id_invitado
+             AND ci.id_sesion = g.id_sesion
+             AND ci.ingreso = TRUE
+         ) THEN 'Ingresó' ELSE 'Pendiente' END AS "estadoIngreso",
+         (
+           SELECT TO_CHAR(ci.hora_ingreso, 'FMHH12:MI AM')
+           FROM public.control_ingreso ci
+           WHERE ci.id_invitado = i.id_invitado
+             AND ci.id_sesion = g.id_sesion
+             AND ci.ingreso = TRUE
+           ORDER BY ci.id_control_ingreso DESC
+           LIMIT 1
+         ) AS "horaIngreso"
+       FROM public.invitado i
+       INNER JOIN public.graduando g ON g.id_graduando = i.id_graduando
+       WHERE g.id_ceremonia = $1
+         AND g.id_sesion = $2
+         AND g.estado = TRUE
+         AND i.autorizado = TRUE
+         AND (
+           i.nombre ILIKE $3
+           OR i.identificacion ILIKE $3
+         )
+       ORDER BY i.nombre, i.id_invitado
+       LIMIT 50`,
+      [req.params.id, sesionId, `%${search}%`],
+    );
+    return res.json(resultado.rows);
+  } catch (error) {
+    return responderError(res, error, 'No fue posible buscar los invitados para control de ingreso.');
+  }
+}
+
 export async function listarInvitadosControlIngreso(req, res) {
   const sesionId = await validarSesionControl(req, res);
   if (!sesionId) return;
@@ -1224,8 +1397,8 @@ export async function listarInvitadosControlIngreso(req, res) {
     validarId(req.params.graduandoId, 'graduando');
     const graduando = await pool.query(
       `SELECT 1
-       FROM public.sgme_ceremonia_graduando
-       WHERE id = $1 AND id_ceremonia = $2 AND id_sesion = $3`,
+       FROM public.graduando
+       WHERE id_graduando = $1 AND id_ceremonia = $2 AND id_sesion = $3`,
       [req.params.graduandoId, req.params.id, sesionId],
     );
     if (graduando.rowCount === 0) {
@@ -1233,21 +1406,34 @@ export async function listarInvitadosControlIngreso(req, res) {
     }
     const resultado = await pool.query(
       `SELECT
-         i.id::text AS id,
+         i.id_invitado::text AS id,
          i.id_graduando::text AS "graduandoId",
-         i.id_ceremonia::text AS "ceremoniaId",
+         g.id_ceremonia::text AS "ceremoniaId",
          i.nombre,
-         COALESCE(i.documento, '') AS documento,
+         COALESCE(i.identificacion, '') AS documento,
          CONCAT_WS(' ', g.nombres, g.apellidos) AS "graduandoNombre",
          COALESCE(i.parentesco, 'Invitado') AS tipo,
          i.telefono,
          i.parentesco,
-         i.autorizacion,
-         CASE WHEN i.ingreso_at IS NULL THEN 'Pendiente' ELSE 'Ingresó' END AS "estadoIngreso",
-         TO_CHAR(i.ingreso_at, 'FMHH12:MI AM') AS "horaIngreso"
-       FROM public.sgme_ceremonia_invitado i
-       INNER JOIN public.sgme_ceremonia_graduando g ON g.id = i.id_graduando
-       WHERE i.id_graduando = $1 AND i.autorizacion = 'Autorizado'
+         CASE WHEN i.autorizado THEN 'Autorizado' ELSE 'Pendiente' END AS autorizacion,
+         CASE WHEN EXISTS (
+           SELECT 1 FROM public.control_ingreso ci
+           WHERE ci.id_invitado = i.id_invitado
+             AND ci.id_sesion = g.id_sesion
+             AND ci.ingreso = TRUE
+         ) THEN 'Ingresó' ELSE 'Pendiente' END AS "estadoIngreso",
+         (
+           SELECT TO_CHAR(ci.hora_ingreso, 'FMHH12:MI AM')
+           FROM public.control_ingreso ci
+           WHERE ci.id_invitado = i.id_invitado
+             AND ci.id_sesion = g.id_sesion
+             AND ci.ingreso = TRUE
+           ORDER BY ci.id_control_ingreso DESC
+           LIMIT 1
+         ) AS "horaIngreso"
+       FROM public.invitado i
+       INNER JOIN public.graduando g ON g.id_graduando = i.id_graduando
+       WHERE i.id_graduando = $1 AND i.autorizado = TRUE
        ORDER BY i.nombre`,
       [req.params.graduandoId],
     );
@@ -1268,9 +1454,9 @@ export async function registrarIngresoGraduando(req, res) {
     await client.query('BEGIN');
     transaccion = true;
     const graduando = await client.query(
-      `SELECT id::text AS id, ingreso_at, ingreso_sesion_id::text AS "ingresoSesionId"
-       FROM public.sgme_ceremonia_graduando
-       WHERE id = $1
+      `SELECT id_graduando::text AS id
+       FROM public.graduando
+       WHERE id_graduando = $1
          AND id_ceremonia = $2
          AND id_sesion = $3
          AND estado = TRUE
@@ -1279,25 +1465,56 @@ export async function registrarIngresoGraduando(req, res) {
     );
     const registro = graduando.rows[0];
     if (!registro) throw errorHttp(404, 'El graduando no pertenece a la sesión seleccionada o está inactivo.');
-    if (registro.ingreso_at && registro.ingresoSesionId !== sesionId) {
+
+    const ingresoOtroDia = await client.query(
+      `SELECT 1
+       FROM public.control_ingreso
+       WHERE id_graduando = $1 AND ingreso = TRUE AND id_sesion <> $2
+       LIMIT 1`,
+      [req.params.graduandoId, sesionId],
+    );
+    if (ingresoOtroDia.rowCount > 0) {
       throw errorHttp(409, 'El ingreso del graduando ya fue registrado en otra sesión.');
     }
-    const yaIngreso = Boolean(registro.ingreso_at);
-    let horaIngreso = null;
-    if (!yaIngreso) {
+
+    const ingresoExistente = await client.query(
+      `SELECT id_control_ingreso, ingreso,
+              TO_CHAR(hora_ingreso, 'FMHH12:MI AM') AS "horaIngreso"
+       FROM public.control_ingreso
+       WHERE id_graduando = $1 AND id_sesion = $2
+       ORDER BY id_control_ingreso DESC
+       LIMIT 1
+       FOR UPDATE`,
+      [req.params.graduandoId, sesionId],
+    );
+    const actual = ingresoExistente.rows[0];
+    const yaIngreso = Boolean(actual?.ingreso);
+    let horaIngreso = actual?.horaIngreso ?? null;
+    if (!yaIngreso && actual) {
       const actualizado = await client.query(
-        `UPDATE public.sgme_ceremonia_graduando
-         SET ingreso_at = NOW(), ingreso_sesion_id = $2, updated_at = NOW()
-         WHERE id = $1
-         RETURNING TO_CHAR(ingreso_at, 'FMHH12:MI AM') AS "horaIngreso"`,
-        [req.params.graduandoId, sesionId],
+        `UPDATE public.control_ingreso
+         SET ingreso = TRUE, hora_ingreso = CURRENT_TIME
+         WHERE id_control_ingreso = $1
+         RETURNING TO_CHAR(hora_ingreso, 'FMHH12:MI AM') AS "horaIngreso"`,
+        [actual.id_control_ingreso],
       );
       horaIngreso = actualizado.rows[0].horaIngreso;
+    } else if (!yaIngreso) {
+      const insertado = await client.query(
+        `INSERT INTO public.control_ingreso (
+           id_sesion, id_graduando, ingreso, hora_ingreso
+         )
+         VALUES ($1, $2, TRUE, CURRENT_TIME)
+         RETURNING TO_CHAR(hora_ingreso, 'FMHH12:MI AM') AS "horaIngreso"`,
+        [sesionId, req.params.graduandoId],
+      );
+      horaIngreso = insertado.rows[0].horaIngreso;
     } else {
       const hora = await client.query(
-        `SELECT TO_CHAR(ingreso_at, 'FMHH12:MI AM') AS "horaIngreso"
-         FROM public.sgme_ceremonia_graduando WHERE id = $1`,
-        [req.params.graduandoId],
+        `SELECT TO_CHAR(hora_ingreso, 'FMHH12:MI AM') AS "horaIngreso"
+         FROM public.control_ingreso
+         WHERE id_control_ingreso = $1`,
+        [actual.id_control_ingreso],
       );
       horaIngreso = hora.rows[0].horaIngreso;
     }
@@ -1329,21 +1546,19 @@ export async function registrarIngresoInvitado(req, res) {
     transaccion = true;
     const invitadoResultado = await client.query(
       `SELECT
-         i.id::text AS id,
-         i.id_ceremonia::text AS "ceremoniaId",
-         i.autorizacion,
-         i.ingreso_at,
-         i.ingreso_sesion_id::text AS "ingresoSesionId",
+         i.id_invitado::text AS id,
+         g.id_ceremonia::text AS "ceremoniaId",
+         i.autorizado,
          g.id_sesion::text AS "sesionGraduando"
-       FROM public.sgme_ceremonia_invitado i
-       INNER JOIN public.sgme_ceremonia_graduando g ON g.id = i.id_graduando
-       WHERE i.id = $1
-       FOR UPDATE OF i`,
+       FROM public.invitado i
+       INNER JOIN public.graduando g ON g.id_graduando = i.id_graduando
+       WHERE i.id_invitado = $1
+       FOR UPDATE OF i, g`,
       [req.params.id],
     );
     const invitado = invitadoResultado.rows[0];
     if (!invitado) throw errorHttp(404, 'El invitado no existe.');
-    if (invitado.autorizacion !== 'Autorizado') {
+    if (!invitado.autorizado) {
       throw errorHttp(409, 'El invitado no está autorizado para ingresar.');
     }
     if (
@@ -1352,25 +1567,55 @@ export async function registrarIngresoInvitado(req, res) {
     ) {
       throw errorHttp(400, 'El invitado no pertenece a la sesión seleccionada.');
     }
-    if (invitado.ingreso_at && invitado.ingresoSesionId !== sesionId) {
+    const ingresoOtroDia = await client.query(
+      `SELECT 1
+       FROM public.control_ingreso
+       WHERE id_invitado = $1 AND ingreso = TRUE AND id_sesion <> $2
+       LIMIT 1`,
+      [req.params.id, sesionId],
+    );
+    if (ingresoOtroDia.rowCount > 0) {
       throw errorHttp(409, 'El ingreso del invitado ya fue registrado en otra sesión.');
     }
-    const yaIngreso = Boolean(invitado.ingreso_at);
-    let horaIngreso = null;
-    if (!yaIngreso) {
+
+    const ingresoExistente = await client.query(
+      `SELECT id_control_ingreso, ingreso,
+              TO_CHAR(hora_ingreso, 'FMHH12:MI AM') AS "horaIngreso"
+       FROM public.control_ingreso
+       WHERE id_invitado = $1 AND id_sesion = $2
+       ORDER BY id_control_ingreso DESC
+       LIMIT 1
+       FOR UPDATE`,
+      [req.params.id, sesionId],
+    );
+    const actual = ingresoExistente.rows[0];
+    const yaIngreso = Boolean(actual?.ingreso);
+    let horaIngreso = actual?.horaIngreso ?? null;
+    if (!yaIngreso && actual) {
       const actualizado = await client.query(
-        `UPDATE public.sgme_ceremonia_invitado
-         SET ingreso_at = NOW(), ingreso_sesion_id = $2, updated_at = NOW()
-         WHERE id = $1
-         RETURNING TO_CHAR(ingreso_at, 'FMHH12:MI AM') AS "horaIngreso"`,
-        [req.params.id, sesionId],
+        `UPDATE public.control_ingreso
+         SET ingreso = TRUE, hora_ingreso = CURRENT_TIME
+         WHERE id_control_ingreso = $1
+         RETURNING TO_CHAR(hora_ingreso, 'FMHH12:MI AM') AS "horaIngreso"`,
+        [actual.id_control_ingreso],
       );
       horaIngreso = actualizado.rows[0].horaIngreso;
+    } else if (!yaIngreso) {
+      const insertado = await client.query(
+        `INSERT INTO public.control_ingreso (
+           id_sesion, id_invitado, ingreso, hora_ingreso
+         )
+         VALUES ($1, $2, TRUE, CURRENT_TIME)
+         RETURNING TO_CHAR(hora_ingreso, 'FMHH12:MI AM') AS "horaIngreso"`,
+        [sesionId, req.params.id],
+      );
+      horaIngreso = insertado.rows[0].horaIngreso;
     } else {
       const hora = await client.query(
-        `SELECT TO_CHAR(ingreso_at, 'FMHH12:MI AM') AS "horaIngreso"
-         FROM public.sgme_ceremonia_invitado WHERE id = $1`,
-        [req.params.id],
+        `SELECT TO_CHAR(hora_ingreso, 'FMHH12:MI AM') AS "horaIngreso"
+         FROM public.control_ingreso
+         WHERE id_control_ingreso = $1`,
+        [actual.id_control_ingreso],
       );
       horaIngreso = hora.rows[0].horaIngreso;
     }
@@ -1396,31 +1641,31 @@ export async function iniciarSesionGraduando(req, res) {
     const codigoEstudiantil = texto(req.body?.codigoEstudiantil, 40, 'El código estudiantil', true);
     const resultado = await pool.query(
       `SELECT
-         g.id::text AS id,
+         g.id_graduando::text AS id,
          g.id_ceremonia::text AS "ceremoniaId",
          g.nombres,
          g.apellidos,
-         g.documento,
+         g.identificacion AS documento,
          g.codigo_estudiantil AS "codigoEstudiantil",
          COALESCE(
            STRING_AGG(DISTINCT p.nombre, ', ' ORDER BY p.nombre),
            'Sin programa'
          ) AS programa,
          c.max_invitados_por_graduando AS "maxInvitadosPorGraduando",
-         COUNT(DISTINCT i.id)::integer AS "invitadosRegistrados"
-       FROM public.sgme_ceremonia_graduando g
-       INNER JOIN public.sgme_ceremonia c ON c.id = g.id_ceremonia
-       LEFT JOIN public.sgme_ceremonia_graduando_programa gp ON gp.id_graduando = g.id
+         COUNT(DISTINCT i.id_invitado)::integer AS "invitadosRegistrados"
+       FROM public.graduando g
+       INNER JOIN public.ceremonia_grado c ON c.id_ceremonia = g.id_ceremonia
+       LEFT JOIN public.graduando_programa gp ON gp.id_graduando = g.id_graduando
        LEFT JOIN public.programa p ON p.id_programa = gp.id_programa
-       LEFT JOIN public.sgme_ceremonia_invitado i ON i.id_graduando = g.id
+       LEFT JOIN public.invitado i ON i.id_graduando = g.id_graduando
        WHERE COALESCE(
-           NULLIF(REGEXP_REPLACE(g.documento, '[^0-9]', '', 'g'), ''),
-           LOWER(BTRIM(g.documento))
+           NULLIF(REGEXP_REPLACE(g.identificacion, '[^0-9]', '', 'g'), ''),
+           LOWER(BTRIM(g.identificacion))
          ) = $1
          AND LOWER(BTRIM(g.codigo_estudiantil)) = LOWER($2)
          AND g.estado = TRUE
          AND c.estado NOT IN ('Finalizada', 'Cancelada')
-       GROUP BY g.id, c.max_invitados_por_graduando
+       GROUP BY g.id_graduando, c.max_invitados_por_graduando, c.fecha
        ORDER BY c.fecha DESC
        LIMIT 2`,
       [documentoCanonico(documento), codigoEstudiantil],

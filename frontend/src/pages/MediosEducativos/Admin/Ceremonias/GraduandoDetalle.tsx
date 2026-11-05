@@ -467,7 +467,7 @@ export default function GraduandoDetalle() {
           <TextField fullWidth size="small" label="Nombre" value={invNombre} onChange={(e) => setInvNombre(e.target.value)}
             sx={{ mb: 2, '& .MuiOutlinedInput-root': { borderRadius: '8px' } }} />
           <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 2, mb: 1 }}>
-            <TextField size="small" label="Documento" value={invDoc} onChange={(e) => setInvDoc(e.target.value)}
+            <TextField size="small" label="Documento" value={invDoc} onChange={(e) => setInvDoc(e.target.value.replace(/\D/g, ''))}
               sx={{ '& .MuiOutlinedInput-root': { borderRadius: '8px' } }} />
             <TextField select size="small" label="Estado" value={invEstado} onChange={(e) => setInvEstado(e.target.value)}
               sx={{ '& .MuiOutlinedInput-root': { borderRadius: '8px' } }}>

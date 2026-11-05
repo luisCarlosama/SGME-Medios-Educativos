@@ -7,6 +7,7 @@ import authRoutes from './src/routes/authRoutes.js';
 import dashboardRoutes from './src/routes/dashboardRoutes.js'; 
 import reservasRoutes from './src/routes/reservasRoutes.js';
 import ceremoniasRoutes from './src/routes/ceremoniasRoutes.js';
+import { iniciarAutomatizacionEstadosSesiones } from './src/services/sesionesScheduler.js';
 
 dotenv.config();
 
@@ -68,4 +69,5 @@ app.get('/api/health/db', async (req, res) => {
 
 app.listen(PORT, () => {
   console.log(`Backend ejecutándose en http://localhost:${PORT}`);
+  iniciarAutomatizacionEstadosSesiones();
 });

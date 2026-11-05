@@ -41,7 +41,7 @@ export const obtenerTiposEspacio = async (req, res) => {
 // Obtener espacios activos filtrados por campus y tipo
 export const obtenerEspacios = async (req, res) => {
   try {
-    const { id_campus, id_tipo_espacio } = req.query;
+    const { id_campus, id_tipo_espacio, solo_auditorios } = req.query;
 
     const condiciones = ['e.estado = TRUE'];
     const valores = [];
@@ -54,6 +54,10 @@ export const obtenerEspacios = async (req, res) => {
     if (id_tipo_espacio) {
       valores.push(Number(id_tipo_espacio));
       condiciones.push(`e.id_tipo_espacio = $${valores.length}`);
+    }
+
+    if (solo_auditorios === 'true') {
+      condiciones.push("e.nombre ILIKE '%auditorio%'");
     }
 
     const resultado = await pool.query(

@@ -20,13 +20,18 @@ import {
 } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
 import CloseIcon from '@mui/icons-material/Close';
-import type { Ceremonia, Sesion } from './interfaces/ceremonias.interface';
+import type {
+  Ceremonia,
+  EstadoSesionConfiguracion,
+  Sesion,
+} from './interfaces/ceremonias.interface';
 import {
   getCeremoniaById,
   getSesionById,
   getProgramasActivos,
   updateSesion,
   HORA_OPTIONS,
+  formatearHora12,
 } from './services/ceremonias.service';
 
 export default function ConfigurarSesion() {
@@ -36,7 +41,7 @@ export default function ConfigurarSesion() {
   const [sesion, setSesion] = useState<Sesion | null>(null);
   const [loading, setLoading] = useState(true);
   const [nombre, setNombre] = useState('');
-  const [estado, setEstado] = useState('Pendiente');
+  const [estado, setEstado] = useState<EstadoSesionConfiguracion>('Programada');
   const [horaInicio, setHoraInicio] = useState('');
   const [horaFin, setHoraFin] = useState('');
   /** Programas ya asociados a la sesión */
@@ -56,7 +61,7 @@ export default function ConfigurarSesion() {
         setProgramasActivos(p);
         if (s) {
           setNombre(s.nombre);
-          setEstado(s.estado);
+          setEstado(s.estado === 'Pendiente' ? 'Programada' : s.estado);
           setHoraInicio(s.horaInicio || '');
           setHoraFin(s.horaFin || '');
           if (s.programas?.length) {
@@ -91,22 +96,27 @@ export default function ConfigurarSesion() {
       setError('Ingresa el nombre de la sesión.');
       return;
     }
-    if ((horaInicio && !horaFin) || (!horaInicio && horaFin) || (horaInicio && horaInicio >= horaFin)) {
-      setError('Completa un rango de horas válido.');
+    if (!horaInicio || !horaFin || horaInicio >= horaFin) {
+      setError('Configura una hora de inicio y finalización válidas.');
       return;
     }
 
     setSaving(true);
     setError('');
     try {
-      await updateSesion(sesionId, {
+      const resultado = await updateSesion(sesionId, {
         nombre: nombre.trim(),
-        estado: estado as Sesion['estado'],
+        estado,
         horaInicio,
         horaFin,
         programas,
       });
-      navigate(`/admin/eventos/ceremonias/${id}`);
+      const mensaje = resultado.graduandosAsignados > 0
+        ? `Configuración guardada correctamente. Se asignaron ${resultado.graduandosAsignados} graduandos a esta sesión según los programas académicos seleccionados.`
+        : 'No se encontraron graduandos pendientes de asignación para los programas seleccionados.';
+      navigate(`/admin/eventos/ceremonias/${id}`, {
+        state: { mensajeAsignacionSesion: mensaje },
+      });
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'No fue posible guardar la sesión.');
     } finally {
@@ -228,10 +238,10 @@ export default function ConfigurarSesion() {
                 size="small"
                 label="Estado"
                 value={estado}
-                onChange={(e) => setEstado(e.target.value)}
+                onChange={(e) => setEstado(e.target.value as EstadoSesionConfiguracion)}
                 sx={{ '& .MuiOutlinedInput-root': { borderRadius: '8px' } }}
               >
-                <MenuItem value="Pendiente">Pendiente</MenuItem>
+                <MenuItem value="Programada">Programada</MenuItem>
                 <MenuItem value="En curso">En curso</MenuItem>
                 <MenuItem value="Finalizada">Finalizada</MenuItem>
               </TextField>
@@ -248,14 +258,15 @@ export default function ConfigurarSesion() {
                 select
                 size="small"
                 label="Hora de inicio"
+                required
                 value={horaInicio}
                 onChange={(e) => setHoraInicio(e.target.value)}
                 sx={{ '& .MuiOutlinedInput-root': { borderRadius: '8px' } }}
               >
                 <MenuItem value="">Selecciona hora</MenuItem>
-                {HORA_OPTIONS.map((h) => (
-                  <MenuItem key={h} value={h}>
-                    {h}
+                {HORA_OPTIONS.map(({ value, label }) => (
+                  <MenuItem key={value} value={value}>
+                    {label}
                   </MenuItem>
                 ))}
               </TextField>
@@ -263,14 +274,15 @@ export default function ConfigurarSesion() {
                 select
                 size="small"
                 label="Hora de finalización"
+                required
                 value={horaFin}
                 onChange={(e) => setHoraFin(e.target.value)}
                 sx={{ '& .MuiOutlinedInput-root': { borderRadius: '8px' } }}
               >
                 <MenuItem value="">Selecciona hora</MenuItem>
-                {HORA_OPTIONS.map((h) => (
-                  <MenuItem key={h} value={h}>
-                    {h}
+                {HORA_OPTIONS.map(({ value, label }) => (
+                  <MenuItem key={value} value={value}>
+                    {label}
                   </MenuItem>
                 ))}
               </TextField>
@@ -453,7 +465,9 @@ export default function ConfigurarSesion() {
                   fontSize: '0.875rem',
                 }}
               >
-                {horaInicio ? `${horaInicio} – ${horaFin}` : '—'}
+                {horaInicio && horaFin
+                  ? `${formatearHora12(horaInicio)} – ${formatearHora12(horaFin)}`
+                  : '—'}
               </Typography>
             </Box>
 

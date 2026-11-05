@@ -7,40 +7,106 @@ import { useNavigate } from 'react-router-dom';
 import {
   Box, Typography, Button, TextField, MenuItem, Card, CardContent,
 } from '@mui/material';
-import type { EstadoCeremonia } from './interfaces/ceremonias.interface';
 import {
   createCeremonia,
+  getCampusCeremonias,
   getEspaciosActivos,
+  type CampusOption,
   type EspacioOption,
 } from './services/ceremonias.service';
+
+const campusPermitidos = new Set(['centro', 'san damian', 'santiago']);
+
+function normalizarNombreCampus(nombre: string): string {
+  return nombre
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim()
+    .toLowerCase()
+    .replace(/^campus\s+/, '');
+}
+
+function nombreVisibleCampus(nombre: string): string {
+  return nombre.replace(/^campus\s+/i, '');
+}
 
 export default function NuevaCeremonia() {
   const navigate = useNavigate();
   const [nombre, setNombre] = useState('');
   const [fecha, setFecha] = useState('');
+  const [campus, setCampus] = useState<CampusOption[]>([]);
+  const [idCampus, setIdCampus] = useState('');
   const [espacios, setEspacios] = useState<EspacioOption[]>([]);
   const [idEspacio, setIdEspacio] = useState('');
-  const [estado, setEstado] = useState<EstadoCeremonia>('Programada');
   const [maxInvitadosPorGraduando, setMaxInvitadosPorGraduando] = useState(2);
-  const [loadingOptions, setLoadingOptions] = useState(true);
+  const [loadingCampus, setLoadingCampus] = useState(true);
+  const [loadingEspacios, setLoadingEspacios] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
   useEffect(() => {
-    getEspaciosActivos()
-      .then((espaciosActivos) => {
-        setEspacios(espaciosActivos);
+    let activo = true;
+    getCampusCeremonias()
+      .then((campusDisponibles) => {
+        if (!activo) return;
+        const permitidos = campusDisponibles.filter((opcion) =>
+          campusPermitidos.has(normalizarNombreCampus(opcion.nombre)),
+        );
+        setCampus(permitidos);
+        if (permitidos.length === 0) {
+          setError('No se encontraron los campus Centro, San Damián o Santiago.');
+        }
       })
       .catch((cause) => {
-        setError(cause instanceof Error ? cause.message : 'No fue posible cargar los espacios.');
+        if (activo) {
+          setError(cause instanceof Error ? cause.message : 'No fue posible cargar los campus.');
+        }
       })
-      .finally(() => setLoadingOptions(false));
+      .finally(() => {
+        if (activo) setLoadingCampus(false);
+      });
+
+    return () => {
+      activo = false;
+    };
   }, []);
+
+  useEffect(() => {
+    let activo = true;
+    setIdEspacio('');
+    setEspacios([]);
+    if (!idCampus) {
+      setLoadingEspacios(false);
+      return () => {
+        activo = false;
+      };
+    }
+
+    setLoadingEspacios(true);
+    getEspaciosActivos(idCampus)
+      .then((espaciosActivos) => {
+        if (activo) {
+          setEspacios(espaciosActivos.filter((espacio) => /auditorio/i.test(espacio.nombre)));
+        }
+      })
+      .catch((cause) => {
+        if (activo) {
+          setError(cause instanceof Error ? cause.message : 'No fue posible cargar los auditorios.');
+        }
+      })
+      .finally(() => {
+        if (activo) setLoadingEspacios(false);
+      });
+
+    return () => {
+      activo = false;
+    };
+  }, [idCampus]);
 
   const handleCrear = async () => {
     setError('');
-    if (!nombre.trim() || !fecha || !idEspacio) {
-      setError('Completa el nombre, la fecha y el lugar.');
+    if (!nombre.trim() || !fecha || !idCampus || !idEspacio) {
+      setError('Completa el nombre, la fecha, el campus y el auditorio.');
       return;
     }
     setSaving(true);
@@ -49,7 +115,7 @@ export default function NuevaCeremonia() {
         nombre: nombre.trim(),
         fecha,
         idEspacio: Number(idEspacio),
-        estado,
+        estado: 'Programada',
         maxInvitadosPorGraduando,
       });
       navigate(`/admin/eventos/ceremonias/${c.id}`);
@@ -92,7 +158,7 @@ export default function NuevaCeremonia() {
             sx={{ mb: 2.5, '& .MuiOutlinedInput-root': { borderRadius: '8px' } }}
           />
 
-          <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr 1fr' }, gap: 2, mb: 3 }}>
+          <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr' }, gap: 2, mb: 3 }}>
             <Box>
               <Typography sx={{ fontWeight: 500, fontSize: '0.875rem', color: '#1A2A3A', mb: 0.75 }}>Fecha</Typography>
               <TextField fullWidth size="small" type="date" slotProps={{ inputLabel: { shrink: true } }}
@@ -102,30 +168,57 @@ export default function NuevaCeremonia() {
               />
             </Box>
             <Box>
-              <Typography sx={{ fontWeight: 500, fontSize: '0.875rem', color: '#1A2A3A', mb: 0.75 }}>Lugar / campus</Typography>
-              <TextField select fullWidth size="small" value={idEspacio}
-                onChange={(e) => setIdEspacio(e.target.value)}
-                disabled={loadingOptions || espacios.length === 0}
+              <Typography sx={{ fontWeight: 500, fontSize: '0.875rem', color: '#1A2A3A', mb: 0.75 }}>Campus</Typography>
+              <TextField select fullWidth size="small" value={idCampus}
+                onChange={(e) => {
+                  setError('');
+                  setIdCampus(e.target.value);
+                }}
+                disabled={loadingCampus || campus.length === 0}
                 sx={{ '& .MuiOutlinedInput-root': { borderRadius: '8px' } }}
               >
-                <MenuItem value="">Selecciona el lugar o campus</MenuItem>
+                <MenuItem value="">{loadingCampus ? 'Cargando campus...' : 'Selecciona un campus'}</MenuItem>
+                {campus.map((opcion) => (
+                  <MenuItem key={opcion.id_campus} value={String(opcion.id_campus)}>
+                    {nombreVisibleCampus(opcion.nombre)}
+                  </MenuItem>
+                ))}
+              </TextField>
+            </Box>
+            <Box>
+              <Typography sx={{ fontWeight: 500, fontSize: '0.875rem', color: '#1A2A3A', mb: 0.75 }}>Auditorio</Typography>
+              <TextField select fullWidth size="small" value={idEspacio}
+                onChange={(e) => setIdEspacio(e.target.value)}
+                disabled={!idCampus || loadingEspacios}
+                helperText={
+                  !idCampus
+                    ? 'Selecciona primero un campus.'
+                    : loadingEspacios
+                      ? 'Cargando auditorios...'
+                      : espacios.length === 0
+                        ? 'Este campus no tiene auditorios disponibles.'
+                        : ''
+                }
+                sx={{ '& .MuiOutlinedInput-root': { borderRadius: '8px' } }}
+              >
+                <MenuItem value="">
+                  {espacios.length === 0 && idCampus && !loadingEspacios
+                    ? 'No hay auditorios disponibles'
+                    : 'Selecciona un auditorio'}
+                </MenuItem>
                 {espacios.map((espacio) => (
                   <MenuItem key={espacio.id_espacio} value={String(espacio.id_espacio)}>
-                    {espacio.nombre} · {espacio.campus}
+                    {espacio.nombre}
                   </MenuItem>
                 ))}
               </TextField>
             </Box>
             <Box>
               <Typography sx={{ fontWeight: 500, fontSize: '0.875rem', color: '#1A2A3A', mb: 0.75 }}>Estado</Typography>
-              <TextField select fullWidth size="small" value={estado}
-                onChange={(e) => setEstado(e.target.value as EstadoCeremonia)}
+              <TextField fullWidth size="small" value="Programada"
+                slotProps={{ input: { readOnly: true } }}
                 sx={{ '& .MuiOutlinedInput-root': { borderRadius: '8px' } }}
-              >
-                <MenuItem value="Programada">Programada</MenuItem>
-                <MenuItem value="En curso">En curso</MenuItem>
-                <MenuItem value="Finalizada">Finalizada</MenuItem>
-              </TextField>
+              />
             </Box>
           </Box>
 
@@ -171,7 +264,7 @@ export default function NuevaCeremonia() {
               sx={{ textTransform: 'none', fontWeight: 500, borderRadius: '8px', borderColor: '#C5CDD8', color: '#1A2A3A' }}>
               Cancelar
             </Button>
-            <Button variant="contained" disabled={saving || loadingOptions || !nombre.trim()} onClick={handleCrear}
+            <Button variant="contained" disabled={saving || loadingCampus || loadingEspacios || !nombre.trim()} onClick={handleCrear}
               sx={{
                 backgroundColor: '#E30613', textTransform: 'none', fontWeight: 600, borderRadius: '8px',
                 px: 2.5, boxShadow: 'none', '&:hover': { backgroundColor: '#C10510', boxShadow: 'none' },

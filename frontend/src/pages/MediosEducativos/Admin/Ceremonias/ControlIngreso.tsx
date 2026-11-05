@@ -18,12 +18,14 @@ import type {
 } from './interfaces/ceremonias.interface';
 import {
   buscarGraduandosControlIngreso,
+  buscarInvitadosControlIngreso,
   getCeremoniaById,
   getEstadisticasControlIngreso,
   getInvitadosControlIngreso,
   getSesiones,
   registrarIngreso,
   registrarIngresoGraduando,
+  formatearHora12,
 } from './services/ceremonias.service';
 
 function nombreSesion(sesion: Sesion): string {
@@ -71,9 +73,12 @@ export default function ControlIngreso() {
   const [sesiones, setSesiones] = useState<Sesion[]>([]);
   const [estadisticas, setEstadisticas] = useState<EstadisticasControlIngreso | null>(null);
   const [graduando, setGraduando] = useState<Graduando | null>(null);
+  const [invitadoSeleccionado, setInvitadoSeleccionado] = useState<Invitado | null>(null);
   const [resultadosBusqueda, setResultadosBusqueda] = useState<Graduando[]>([]);
+  const [resultadosInvitadosBusqueda, setResultadosInvitadosBusqueda] = useState<Invitado[]>([]);
   const [invitados, setInvitados] = useState<Invitado[]>([]);
   const [search, setSearch] = useState('');
+  const [busquedaRealizada, setBusquedaRealizada] = useState(false);
   const [loading, setLoading] = useState(true);
   const [loadingEstadisticas, setLoadingEstadisticas] = useState(false);
   const [loadingBusqueda, setLoadingBusqueda] = useState(false);
@@ -165,8 +170,11 @@ export default function ControlIngreso() {
     else parametros.delete('sesion');
     setSearchParams(parametros);
     setGraduando(null);
+    setInvitadoSeleccionado(null);
     setResultadosBusqueda([]);
+    setResultadosInvitadosBusqueda([]);
     setInvitados([]);
+    setBusquedaRealizada(false);
     setEstadisticas(null);
     setError('');
     setNotice('');
@@ -177,6 +185,8 @@ export default function ControlIngreso() {
     setError('');
     setNotice('');
     setGraduando(seleccionado);
+    setInvitadoSeleccionado(null);
+    setResultadosInvitadosBusqueda([]);
     setInvitados([]);
     setLoadingInvitados(true);
     try {
@@ -188,6 +198,15 @@ export default function ControlIngreso() {
       setLoadingInvitados(false);
     }
   }, [id, selectedSessionId]);
+
+  const seleccionarInvitado = (seleccionado: Invitado) => {
+    setError('');
+    setNotice('');
+    setGraduando(null);
+    setResultadosBusqueda([]);
+    setInvitados([]);
+    setInvitadoSeleccionado(seleccionado);
+  };
 
   const handleSearch = async () => {
     if (!id || !selectedSessionId) {
@@ -202,13 +221,25 @@ export default function ControlIngreso() {
     setError('');
     setNotice('');
     setGraduando(null);
+    setInvitadoSeleccionado(null);
     setInvitados([]);
     setResultadosBusqueda([]);
+    setResultadosInvitadosBusqueda([]);
+    setBusquedaRealizada(false);
     setLoadingBusqueda(true);
     try {
-      const resultados = await buscarGraduandosControlIngreso(id, selectedSessionId, search.trim());
-      setResultadosBusqueda(resultados);
-      if (resultados.length === 1) await seleccionarGraduando(resultados[0]);
+      const [graduandosEncontrados, invitadosEncontrados] = await Promise.all([
+        buscarGraduandosControlIngreso(id, selectedSessionId, search.trim()),
+        buscarInvitadosControlIngreso(id, selectedSessionId, search.trim()),
+      ]);
+      setResultadosBusqueda(graduandosEncontrados);
+      setResultadosInvitadosBusqueda(invitadosEncontrados);
+      setBusquedaRealizada(true);
+      if (graduandosEncontrados.length === 1 && invitadosEncontrados.length === 0) {
+        await seleccionarGraduando(graduandosEncontrados[0]);
+      } else if (graduandosEncontrados.length === 0 && invitadosEncontrados.length === 1) {
+        setInvitadoSeleccionado(invitadosEncontrados[0]);
+      }
     } catch (searchError) {
       setError(searchError instanceof Error ? searchError.message : 'No fue posible buscar el graduando.');
     } finally {
@@ -246,9 +277,18 @@ export default function ControlIngreso() {
     setNotice('');
     try {
       const resultado = await registrarIngreso(invitado.id, selectedSessionId);
+      const invitadoActualizado = {
+        ...invitado,
+        estadoIngreso: 'Ingresó' as const,
+        horaIngreso: resultado.horaIngreso || undefined,
+      };
       setInvitados((actuales) => actuales.map((actual) => actual.id === invitado.id
-        ? { ...actual, estadoIngreso: 'Ingresó', horaIngreso: resultado.horaIngreso || undefined }
+        ? invitadoActualizado
         : actual));
+      setResultadosInvitadosBusqueda((actuales) => actuales.map((actual) => actual.id === invitado.id
+        ? invitadoActualizado
+        : actual));
+      setInvitadoSeleccionado((actual) => actual?.id === invitado.id ? invitadoActualizado : actual);
       setEstadisticas(resultado.estadisticas);
       setNotice(resultado.horaIngreso
         ? `${resultado.mensaje} · ${resultado.horaIngreso}`
@@ -294,7 +334,7 @@ export default function ControlIngreso() {
           </Typography>
           <Typography sx={{ color: 'rgba(255,255,255,0.75)', fontSize: '0.8rem' }}>
             Hora: {selectedSession
-              ? `${selectedSession.horaInicio || '—'} – ${selectedSession.horaFin || '—'}`
+              ? `${formatearHora12(selectedSession.horaInicio) || '—'} – ${formatearHora12(selectedSession.horaFin) || '—'}`
               : '—'}
             {' · Programas: '}
             {selectedSession?.programas.length ? selectedSession.programas.join(', ') : '—'}
@@ -344,9 +384,12 @@ export default function ControlIngreso() {
             <TextField
               fullWidth
               size="small"
-              placeholder="Nombre o número de documento"
+              placeholder="Nombre o documento de graduando o invitado"
               value={search}
-              onChange={(event) => setSearch(event.target.value)}
+              onChange={(event) => {
+                setSearch(event.target.value);
+                setBusquedaRealizada(false);
+              }}
               onKeyDown={(event) => { if (event.key === 'Enter') void handleSearch(); }}
               sx={{ '& .MuiOutlinedInput-root': { borderRadius: '8px' } }}
             />
@@ -361,9 +404,14 @@ export default function ControlIngreso() {
             </Button>
           </Box>
 
-          {resultadosBusqueda.length > 1 && (
+          {busquedaRealizada
+            && resultadosBusqueda.length === 0
+            && resultadosInvitadosBusqueda.length === 0
+            && <Alert severity="info" sx={{ mb: 2 }}>No se encontraron graduandos ni invitados autorizados en esta sesión.</Alert>}
+
+          {resultadosBusqueda.length > 0 && !graduando && (
             <Box sx={{ backgroundColor: '#FFFFFF', border: '1px solid #E5EAF0', borderRadius: '12px', p: 2, mb: 2 }}>
-              <Typography sx={{ fontWeight: 600, mb: 1 }}>Selecciona el graduando</Typography>
+              <Typography sx={{ fontWeight: 600, mb: 1 }}>Graduandos encontrados</Typography>
               {resultadosBusqueda.map((resultado) => (
                 <Button
                   key={resultado.id}
@@ -375,6 +423,76 @@ export default function ControlIngreso() {
                   <span>{resultado.documento}</span>
                 </Button>
               ))}
+            </Box>
+          )}
+
+          {resultadosInvitadosBusqueda.length > 0 && !invitadoSeleccionado && (
+            <Box sx={{ backgroundColor: '#FFFFFF', border: '1px solid #E5EAF0', borderRadius: '12px', p: 2, mb: 2 }}>
+              <Typography sx={{ fontWeight: 600, mb: 1 }}>Invitados encontrados</Typography>
+              {resultadosInvitadosBusqueda.map((resultado) => (
+                <Button
+                  key={resultado.id}
+                  fullWidth
+                  onClick={() => seleccionarInvitado(resultado)}
+                  sx={{ justifyContent: 'space-between', textTransform: 'none', color: '#1A2A3A', gap: 2 }}
+                >
+                  <span>{resultado.nombre} · invitado de {resultado.graduandoNombre}</span>
+                  <span>{resultado.documento || 'Sin documento'}</span>
+                </Button>
+              ))}
+            </Box>
+          )}
+
+          {invitadoSeleccionado && (
+            <Box sx={{
+              backgroundColor: '#FFFFFF', borderRadius: '12px', border: '1px solid #E5EAF0',
+              p: 2.5, mb: 2.5, display: 'grid', gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr 1fr' }, gap: 2,
+            }}>
+              <Box>
+                <Typography sx={{ color: '#5A6A7A', fontSize: '0.8rem' }}>Invitado seleccionado</Typography>
+                <Typography sx={{ fontWeight: 700, fontSize: '1.1rem', color: '#0B1A2A' }}>
+                  {invitadoSeleccionado.nombre}
+                </Typography>
+                <Typography sx={{ color: '#5A6A7A', fontSize: '0.85rem' }}>
+                  Documento: {invitadoSeleccionado.documento || '—'}
+                </Typography>
+                <Typography sx={{ color: '#5A6A7A', fontSize: '0.85rem' }}>
+                  Graduando: {invitadoSeleccionado.graduandoNombre}
+                </Typography>
+              </Box>
+              <Box>
+                <Typography sx={{ color: '#5A6A7A', fontSize: '0.8rem' }}>Estado de ingreso</Typography>
+                <Chip
+                  label={invitadoSeleccionado.estadoIngreso || 'Pendiente'}
+                  size="small"
+                  sx={{
+                    backgroundColor: invitadoSeleccionado.estadoIngreso === 'Ingresó' ? '#E6F4EA' : '#FFF4E5',
+                    color: invitadoSeleccionado.estadoIngreso === 'Ingresó' ? '#1B7A3D' : '#B76E00',
+                    fontWeight: 600,
+                    mt: 0.5,
+                  }}
+                />
+                <Typography sx={{ color: '#5A6A7A', fontSize: '0.85rem', mt: 0.5 }}>
+                  Sesión: {sesionLabel}
+                </Typography>
+              </Box>
+              <Box sx={{ textAlign: { sm: 'right' } }}>
+                {invitadoSeleccionado.estadoIngreso === 'Ingresó' ? (
+                  <Typography sx={{ color: '#1B7A3D', fontWeight: 600, fontSize: '0.9rem' }}>
+                    Ya ingresó{invitadoSeleccionado.horaIngreso ? ` · ${invitadoSeleccionado.horaIngreso}` : ''}
+                  </Typography>
+                ) : (
+                  <Button
+                    variant="contained"
+                    disabled={savingId === `invitado:${invitadoSeleccionado.id}`}
+                    onClick={() => void handleRegistrarInvitado(invitadoSeleccionado)}
+                    sx={{ backgroundColor: '#E30613', textTransform: 'none', fontWeight: 600, borderRadius: '8px',
+                      '&:hover': { backgroundColor: '#C10510' } }}
+                  >
+                    {savingId === `invitado:${invitadoSeleccionado.id}` ? 'Registrando…' : 'Registrar ingreso'}
+                  </Button>
+                )}
+              </Box>
             </Box>
           )}
 
@@ -509,7 +627,9 @@ export default function ControlIngreso() {
             </TableContainer>
           ) : (
             <Box sx={{ backgroundColor: '#FFFFFF', border: '1px solid #E5EAF0', borderRadius: '12px', p: 2, color: '#5A6A7A' }}>
-              Busca un graduando para consultar sus invitados autorizados.
+              {invitadoSeleccionado
+                ? 'El invitado seleccionado se gestiona desde su ficha de ingreso.'
+                : 'Busca un graduando para consultar sus invitados autorizados.'}
             </Box>
           )}
         </>

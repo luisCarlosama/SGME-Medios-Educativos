@@ -8,41 +8,42 @@ const ESTADOS_CEREMONIA = new Set([
   'Cancelada',
 ]);
 
-const ID_UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const ID_INTEGER_REGEX = /^[1-9]\d*$/;
 const MAX_FOTOS_CEREMONIA = 4;
 const MAX_FOTO_BYTES = 3 * 1024 * 1024;
 const TIPOS_FOTO = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif']);
 
 const SELECT_CEREMONIAS = `
   SELECT
-    c.id::text AS id,
-    c.codigo,
+    c.id_ceremonia::text AS id,
+    c.codigo_ceremonia AS codigo,
     c.nombre,
     TO_CHAR(c.fecha, 'DD/MM/YYYY') AS fecha,
     TO_CHAR(c.fecha, 'YYYY-MM-DD') AS "fechaISO",
     e.nombre AS lugar,
     campus.nombre AS campus,
-    COUNT(DISTINCT s.id)::integer AS sesiones,
+    COUNT(DISTINCT s.id_sesion)::integer AS sesiones,
     (
       SELECT COUNT(*)::integer
-      FROM public.sgme_ceremonia_graduando g
-      WHERE g.id_ceremonia = c.id
+      FROM public.graduando g
+      WHERE g.id_ceremonia = c.id_ceremonia
     ) AS graduandos,
     (
       SELECT COUNT(*)::integer
-      FROM public.sgme_ceremonia_invitado i
-      WHERE i.id_ceremonia = c.id
+      FROM public.invitado i
+      INNER JOIN public.graduando g ON g.id_graduando = i.id_graduando
+      WHERE g.id_ceremonia = c.id_ceremonia
     ) AS invitados,
     c.estado,
     c.max_invitados_por_graduando AS "maxInvitadosPorGraduando",
     c.cupo_invitados AS "cupoInvitados"
-  FROM public.sgme_ceremonia c
+  FROM public.ceremonia_grado c
   INNER JOIN public.espacio e
     ON e.id_espacio = c.id_espacio
   INNER JOIN public.campus campus
     ON campus.id_campus = e.id_campus
-  LEFT JOIN public.sgme_ceremonia_sesion s
-    ON s.id_ceremonia = c.id
+  LEFT JOIN public.sesion s
+    ON s.id_ceremonia = c.id_ceremonia
 `;
 
 function fechaValida(fecha) {
@@ -58,8 +59,8 @@ function fechaValida(fecha) {
 function obtenerCeremonia(id) {
   return pool.query(
     `${SELECT_CEREMONIAS}
-      WHERE c.id = $1
-      GROUP BY c.id, e.nombre, campus.nombre`,
+      WHERE c.id_ceremonia = $1
+      GROUP BY c.id_ceremonia, e.nombre, campus.nombre`,
     [id]
   );
 }
@@ -103,6 +104,17 @@ function validarFoto(foto) {
   return { mimeType, base64, tamanoBytes: contenido.length };
 }
 
+function detectarMimeType(contenido) {
+  if (contenido.subarray(0, 8).equals(Buffer.from('89504e470d0a1a0a', 'hex'))) return 'image/png';
+  if (contenido[0] === 0xff && contenido[1] === 0xd8 && contenido[2] === 0xff) return 'image/jpeg';
+  if (['GIF87a', 'GIF89a'].includes(contenido.toString('ascii', 0, 6))) return 'image/gif';
+  if (
+    contenido.toString('ascii', 0, 4) === 'RIFF'
+    && contenido.toString('ascii', 8, 12) === 'WEBP'
+  ) return 'image/webp';
+  return null;
+}
+
 export async function listarCeremonias(req, res) {
   try {
     const condiciones = [];
@@ -134,7 +146,7 @@ export async function listarCeremonias(req, res) {
     const resultado = await pool.query(
       `${SELECT_CEREMONIAS}
         ${where}
-        GROUP BY c.id, e.nombre, campus.nombre
+        GROUP BY c.id_ceremonia, e.nombre, campus.nombre
         ORDER BY c.fecha DESC, c.nombre ASC`,
       valores
     );
@@ -153,7 +165,7 @@ export async function listarCeremonias(req, res) {
 
 export async function obtenerCeremoniaPorId(req, res) {
   const { id } = req.params;
-  if (!ID_UUID_REGEX.test(id)) {
+  if (!ID_INTEGER_REGEX.test(id) || !Number.isSafeInteger(Number(id))) {
     return res.status(400).json({ mensaje: 'El identificador de ceremonia no es válido.' });
   }
 
@@ -197,8 +209,8 @@ export async function crearCeremonia(req, res) {
     return res.status(400).json({ mensaje: 'El espacio seleccionado no es válido.' });
   }
 
-  if (!ESTADOS_CEREMONIA.has(estado)) {
-    return res.status(400).json({ mensaje: 'El estado indicado no es válido.' });
+  if (estado !== 'Programada' || !ESTADOS_CEREMONIA.has(estado)) {
+    return res.status(400).json({ mensaje: 'Una nueva ceremonia debe crearse en estado Programada.' });
   }
 
   if (![2, 3, 4].includes(Number(maxInvitadosPorGraduando))) {
@@ -207,23 +219,29 @@ export async function crearCeremonia(req, res) {
     });
   }
 
-  const id = randomUUID();
-  const codigo = `CER-${fecha.slice(0, 4)}-${id.slice(0, 8).toUpperCase()}`;
+  const codigo = `CER-${fecha.slice(0, 4)}-${randomUUID().slice(0, 8).toUpperCase()}`;
 
   try {
     const insertado = await pool.query(
-      `INSERT INTO public.sgme_ceremonia (
-         id, codigo, nombre, fecha, id_espacio, estado, max_invitados_por_graduando
+      `INSERT INTO public.ceremonia_grado (
+         id_evento, id_espacio, codigo_ceremonia, nombre, fecha, estado,
+         max_invitados_por_graduando
        )
-       SELECT $1, $2, $3, $4::date, e.id_espacio, $5, $6
+       SELECT NULL, e.id_espacio, $1, $2, $3::date, 'Programada', $4
        FROM public.espacio e
-       WHERE e.id_espacio = $7 AND e.estado = TRUE`,
+       INNER JOIN public.campus campus ON campus.id_campus = e.id_campus
+       WHERE e.id_espacio = $5
+         AND e.estado = TRUE
+         AND e.nombre ILIKE '%auditorio%'
+         AND (
+           lower(btrim(campus.nombre)) IN ('campus centro', 'campus santiago')
+           OR lower(btrim(campus.nombre)) LIKE 'campus san dami%n'
+         )
+       RETURNING id_ceremonia::text AS id`,
       [
-        id,
         codigo,
         nombreNormalizado,
         fecha,
-        estado,
         Number(maxInvitadosPorGraduando),
         espacioId,
       ]
@@ -231,11 +249,11 @@ export async function crearCeremonia(req, res) {
 
     if (insertado.rowCount === 0) {
       return res.status(404).json({
-        mensaje: 'El espacio seleccionado no existe o está inactivo.',
+        mensaje: 'El auditorio seleccionado no existe, está inactivo o no pertenece a un campus permitido.',
       });
     }
 
-    const resultado = await obtenerCeremonia(id);
+    const resultado = await obtenerCeremonia(insertado.rows[0].id);
     return res.status(201).json(resultado.rows[0]);
   } catch (error) {
     console.error('Error al crear ceremonia:', error);
@@ -247,13 +265,13 @@ export async function crearCeremonia(req, res) {
 
 export async function listarSesionesCeremonia(req, res) {
   const { id } = req.params;
-  if (!ID_UUID_REGEX.test(id)) {
+  if (!ID_INTEGER_REGEX.test(id) || !Number.isSafeInteger(Number(id))) {
     return res.status(400).json({ mensaje: 'El identificador de ceremonia no es válido.' });
   }
 
   try {
     const ceremonia = await pool.query(
-      'SELECT 1 FROM public.sgme_ceremonia WHERE id = $1',
+      'SELECT 1 FROM public.ceremonia_grado WHERE id_ceremonia = $1',
       [id]
     );
     if (ceremonia.rowCount === 0) {
@@ -262,7 +280,7 @@ export async function listarSesionesCeremonia(req, res) {
 
     const resultado = await pool.query(
       `SELECT
-         s.id::text AS id,
+         s.id_sesion::text AS id,
          s.id_ceremonia::text AS "ceremoniaId",
          s.numero_sesion AS "numeroSesion",
          s.nombre,
@@ -281,22 +299,22 @@ export async function listarSesionesCeremonia(req, res) {
          ) AS "programaIds",
          (
            SELECT COUNT(*)::integer
-           FROM public.sgme_ceremonia_graduando g
-           WHERE g.id_sesion = s.id
+           FROM public.graduando g
+           WHERE g.id_sesion = s.id_sesion
          ) AS "graduandosCount",
          (
            SELECT COUNT(*)::integer
-           FROM public.sgme_ceremonia_invitado i
-           INNER JOIN public.sgme_ceremonia_graduando g ON g.id = i.id_graduando
-           WHERE g.id_sesion = s.id
+           FROM public.invitado i
+           INNER JOIN public.graduando g ON g.id_graduando = i.id_graduando
+           WHERE g.id_sesion = s.id_sesion
          ) AS "invitadosCount"
-       FROM public.sgme_ceremonia_sesion s
-       LEFT JOIN public.sgme_ceremonia_sesion_programa sp
-         ON sp.id_sesion = s.id
+       FROM public.sesion s
+       LEFT JOIN public.sesion_programa sp
+         ON sp.id_sesion = s.id_sesion
        LEFT JOIN public.programa p
          ON p.id_programa = sp.id_programa
        WHERE s.id_ceremonia = $1
-       GROUP BY s.id
+       GROUP BY s.id_sesion
        ORDER BY s.numero_sesion`,
       [id]
     );
@@ -328,7 +346,7 @@ export async function listarProgramasCeremonia(req, res) {
 
 export async function listarGraduandosCeremonia(req, res) {
   const { id } = req.params;
-  if (!ID_UUID_REGEX.test(id)) {
+  if (!ID_INTEGER_REGEX.test(id) || !Number.isSafeInteger(Number(id))) {
     return res.status(400).json({ mensaje: 'El identificador de ceremonia no es válido.' });
   }
 
@@ -350,14 +368,14 @@ export async function listarGraduandosCeremonia(req, res) {
     condiciones.push(
       `(g.nombres ILIKE ${parametro}
         OR g.apellidos ILIKE ${parametro}
-        OR g.documento ILIKE ${parametro})`
+        OR g.identificacion ILIKE ${parametro})`
     );
   }
 
   if (sesion === 'sin-asignar') {
     condiciones.push('g.id_sesion IS NULL');
   } else if (sesion) {
-    if (!ID_UUID_REGEX.test(sesion)) {
+    if (!ID_INTEGER_REGEX.test(sesion) || !Number.isSafeInteger(Number(sesion))) {
       return res.status(400).json({ mensaje: 'El filtro de sesión no es válido.' });
     }
     valores.push(sesion);
@@ -373,8 +391,8 @@ export async function listarGraduandosCeremonia(req, res) {
     condiciones.push(
       `EXISTS (
         SELECT 1
-        FROM public.sgme_ceremonia_graduando_programa gp_filtro
-        WHERE gp_filtro.id_graduando = g.id
+        FROM public.graduando_programa gp_filtro
+        WHERE gp_filtro.id_graduando = g.id_graduando
           AND gp_filtro.id_programa = $${valores.length}
       )`
     );
@@ -382,7 +400,7 @@ export async function listarGraduandosCeremonia(req, res) {
 
   try {
     const ceremonia = await pool.query(
-      'SELECT 1 FROM public.sgme_ceremonia WHERE id = $1',
+      'SELECT 1 FROM public.ceremonia_grado WHERE id_ceremonia = $1',
       [id]
     );
     if (ceremonia.rowCount === 0) {
@@ -393,47 +411,61 @@ export async function listarGraduandosCeremonia(req, res) {
     const [graduandos, estadisticas] = await Promise.all([
       pool.query(
         `SELECT
-           g.id::text AS id,
+           g.id_graduando::text AS id,
            g.id_ceremonia::text AS "ceremoniaId",
            g.id_sesion::text AS "sesionId",
            g.nombres,
            g.apellidos,
-           g.documento,
+           g.identificacion AS documento,
            g.telefono,
-           g.correo,
+           g.correo_electronico AS correo,
            g.codigo_estudiantil AS "codigoEstudiantil",
            g.talla_toga AS "tallaToga",
            COALESCE(
              (
                SELECT STRING_AGG(DISTINCT p.nombre, ', ' ORDER BY p.nombre)
-               FROM public.sgme_ceremonia_graduando_programa gp
+               FROM public.graduando_programa gp
                INNER JOIN public.programa p
                  ON p.id_programa = gp.id_programa
-               WHERE gp.id_graduando = g.id
+               WHERE gp.id_graduando = g.id_graduando
              ),
              'Sin programa'
            ) AS programa,
            COALESCE(
              (
                SELECT ARRAY_AGG(gp.id_programa ORDER BY gp.id_programa)
-               FROM public.sgme_ceremonia_graduando_programa gp
-               WHERE gp.id_graduando = g.id
+               FROM public.graduando_programa gp
+               WHERE gp.id_graduando = g.id_graduando
              ),
              ARRAY[]::integer[]
            ) AS "programaIds",
            s.nombre AS "sesionLabel",
            (
              SELECT COUNT(*)::integer
-             FROM public.sgme_ceremonia_invitado i
-             WHERE i.id_graduando = g.id
+             FROM public.invitado i
+             WHERE i.id_graduando = g.id_graduando
            ) AS "invitadosCount",
            g.requisitos_cumplidos AS "requisitosCumplidos",
            g.estado,
-           CASE WHEN g.ingreso_at IS NULL THEN 'Pendiente' ELSE 'Ingresó' END AS "estadoIngreso",
-           TO_CHAR(g.ingreso_at, 'FMHH12:MI AM') AS "horaIngreso"
-         FROM public.sgme_ceremonia_graduando g
-         LEFT JOIN public.sgme_ceremonia_sesion s
-           ON s.id = g.id_sesion
+           CASE WHEN EXISTS (
+             SELECT 1
+             FROM public.control_ingreso ci
+             WHERE ci.id_graduando = g.id_graduando
+               AND ci.id_sesion = g.id_sesion
+               AND ci.ingreso = TRUE
+           ) THEN 'Ingresó' ELSE 'Pendiente' END AS "estadoIngreso",
+           (
+             SELECT TO_CHAR(ci.hora_ingreso, 'FMHH12:MI AM')
+             FROM public.control_ingreso ci
+             WHERE ci.id_graduando = g.id_graduando
+               AND ci.id_sesion = g.id_sesion
+               AND ci.ingreso = TRUE
+             ORDER BY ci.id_control_ingreso DESC
+             LIMIT 1
+           ) AS "horaIngreso"
+         FROM public.graduando g
+         LEFT JOIN public.sesion s
+           ON s.id_sesion = g.id_sesion
          WHERE ${where}
          ORDER BY g.apellidos, g.nombres`,
         valores
@@ -443,7 +475,7 @@ export async function listarGraduandosCeremonia(req, res) {
            COUNT(*)::integer AS total,
            COUNT(*) FILTER (WHERE requisitos_cumplidos)::integer AS revisados,
            0::integer AS errores
-         FROM public.sgme_ceremonia_graduando
+         FROM public.graduando
          WHERE id_ceremonia = $1`,
         [id]
       ),
@@ -464,13 +496,13 @@ export async function listarGraduandosCeremonia(req, res) {
 
 export async function obtenerFotografiasCeremonia(req, res) {
   const { id } = req.params;
-  if (!ID_UUID_REGEX.test(id)) {
+  if (!ID_INTEGER_REGEX.test(id) || !Number.isSafeInteger(Number(id))) {
     return res.status(400).json({ mensaje: 'El identificador de ceremonia no es válido.' });
   }
 
   try {
     const ceremonia = await pool.query(
-      'SELECT 1 FROM public.sgme_ceremonia WHERE id = $1',
+      'SELECT 1 FROM public.ceremonia_grado WHERE id_ceremonia = $1',
       [id]
     );
     if (ceremonia.rowCount === 0) {
@@ -479,16 +511,27 @@ export async function obtenerFotografiasCeremonia(req, res) {
 
     const resultado = await pool.query(
       `SELECT
-         slot,
-         mime_type AS "mimeType",
-         base64
-       FROM public.sgme_ceremonia_fotografia
-       WHERE id_ceremonia = $1
-       ORDER BY slot`,
+         evidencia_fotografia_1,
+         evidencia_fotografia_2,
+         evidencia_fotografia_3,
+         evidencia_fotografia_4
+       FROM public.ceremonia_grado
+       WHERE id_ceremonia = $1`,
       [id]
     );
 
-    return res.json({ fotos: resultado.rows });
+    const fotos = [];
+    for (let slot = 1; slot <= MAX_FOTOS_CEREMONIA; slot += 1) {
+      const contenido = resultado.rows[0][`evidencia_fotografia_${slot}`];
+      if (!contenido) continue;
+      const mimeType = detectarMimeType(contenido);
+      if (!mimeType) {
+        throw new Error(`No se pudo identificar el formato de la fotografía ${slot}.`);
+      }
+      fotos.push({ slot, mimeType, base64: contenido.toString('base64') });
+    }
+
+    return res.json({ fotos });
   } catch (error) {
     console.error('Error al consultar fotografías de ceremonia:', error);
     return res.status(500).json({
@@ -499,7 +542,7 @@ export async function obtenerFotografiasCeremonia(req, res) {
 
 export async function guardarFotografiasCeremonia(req, res) {
   const { id } = req.params;
-  if (!ID_UUID_REGEX.test(id)) {
+  if (!ID_INTEGER_REGEX.test(id) || !Number.isSafeInteger(Number(id))) {
     return res.status(400).json({ mensaje: 'El identificador de ceremonia no es válido.' });
   }
 
@@ -527,7 +570,11 @@ export async function guardarFotografiasCeremonia(req, res) {
     transaccionIniciada = true;
 
     const ceremonia = await client.query(
-      'SELECT id FROM public.sgme_ceremonia WHERE id = $1 FOR UPDATE',
+      `SELECT id_ceremonia, evidencia_fotografia_1, evidencia_fotografia_2,
+              evidencia_fotografia_3, evidencia_fotografia_4
+       FROM public.ceremonia_grado
+       WHERE id_ceremonia = $1
+       FOR UPDATE`,
       [id]
     );
     if (ceremonia.rowCount === 0) {
@@ -536,14 +583,10 @@ export async function guardarFotografiasCeremonia(req, res) {
       return res.status(404).json({ mensaje: 'La ceremonia no existe.' });
     }
 
-    const fotosGuardadas = await client.query(
-      `SELECT slot
-       FROM public.sgme_ceremonia_fotografia
-       WHERE id_ceremonia = $1
-       ORDER BY slot`,
-      [id]
+    const slotsOcupados = new Set(
+      Array.from({ length: MAX_FOTOS_CEREMONIA }, (_, index) => index + 1)
+        .filter((slot) => ceremonia.rows[0][`evidencia_fotografia_${slot}`]),
     );
-    const slotsOcupados = new Set(fotosGuardadas.rows.map((foto) => foto.slot));
     const slotsDisponibles = Array.from(
       { length: MAX_FOTOS_CEREMONIA },
       (_, indice) => indice + 1
@@ -558,12 +601,12 @@ export async function guardarFotografiasCeremonia(req, res) {
     }
 
     for (const [indice, foto] of fotosValidadas.entries()) {
+      const columna = `evidencia_fotografia_${slotsDisponibles[indice]}`;
       await client.query(
-        `INSERT INTO public.sgme_ceremonia_fotografia (
-           id_ceremonia, slot, mime_type, base64, tamano_bytes
-         )
-         VALUES ($1, $2, $3, $4, $5)`,
-        [id, slotsDisponibles[indice], foto.mimeType, foto.base64, foto.tamanoBytes]
+        `UPDATE public.ceremonia_grado
+         SET ${columna} = $1
+         WHERE id_ceremonia = $2`,
+        [Buffer.from(foto.base64, 'base64'), id],
       );
     }
 

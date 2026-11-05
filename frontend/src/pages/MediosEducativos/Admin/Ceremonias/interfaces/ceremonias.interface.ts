@@ -3,7 +3,8 @@
  */
 
 export type EstadoCeremonia = 'Programada' | 'En curso' | 'Finalizada' | 'Cancelada';
-export type EstadoSesion = 'Pendiente' | 'En curso' | 'Finalizada';
+export type EstadoSesion = 'Pendiente' | 'Programada' | 'En curso' | 'Finalizada';
+export type EstadoSesionConfiguracion = Exclude<EstadoSesion, 'Pendiente'>;
 export type EstadoAutorizacion = 'Autorizado' | 'Pendiente';
 export type EstadoIngreso = 'Ingresó' | 'Pendiente';
 

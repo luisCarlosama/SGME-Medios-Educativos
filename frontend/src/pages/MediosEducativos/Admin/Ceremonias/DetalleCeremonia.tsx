@@ -4,9 +4,9 @@
  */
 
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { Navigate, useParams, useNavigate } from 'react-router-dom';
+import { Navigate, useParams, useNavigate, useLocation } from 'react-router-dom';
 import {
-  Box, Typography, Button, Card, CardContent, Chip, Dialog, DialogTitle,
+  Alert, Box, Typography, Button, Card, CardContent, Chip, Dialog, DialogTitle,
   DialogContent, DialogActions, TextField, MenuItem, IconButton, CircularProgress,
 } from '@mui/material';
 import CloseIcon from '@mui/icons-material/Close';
@@ -16,7 +16,7 @@ import type { Ceremonia, Sesion } from './interfaces/ceremonias.interface';
 import {
   cambiarEstadoCeremonia, getCeremoniaById, getFotografiasCeremonia,
   updateMaxInvitadosPorGraduando,
-  getSesiones, addSesion, guardarFotografiasCeremonia, HORA_OPTIONS,
+  getSesiones, addSesion, guardarFotografiasCeremonia, HORA_OPTIONS, formatearHora12,
 } from './services/ceremonias.service';
 
 interface FotoItem {
@@ -28,6 +28,18 @@ interface FotoItem {
 
 const ACCEPT_IMAGES = 'image/png,image/jpeg,image/jpg,image/webp,image/gif';
 const MAX_FOTO_BYTES = 3 * 1024 * 1024;
+
+function obtenerMensajeAsignacionSesion(state: unknown): string | null {
+  if (
+    typeof state !== 'object'
+    || state === null
+    || !('mensajeAsignacionSesion' in state)
+    || typeof state.mensajeAsignacionSesion !== 'string'
+  ) {
+    return null;
+  }
+  return state.mensajeAsignacionSesion;
+}
 
 function convertirArchivoABase64(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -52,12 +64,13 @@ function convertirArchivoABase64(file: File): Promise<string> {
 export default function DetalleCeremonia() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const location = useLocation();
   const [ceremonia, setCeremonia] = useState<Ceremonia | null>(null);
   const [sesiones, setSesiones] = useState<Sesion[]>([]);
   const [loading, setLoading] = useState(true);
+  const [asignacionSesionSuccess, setAsignacionSesionSuccess] = useState('');
   const [modalOpen, setModalOpen] = useState(false);
   const [sesionNombre, setSesionNombre] = useState('');
-  const [sesionEstado, setSesionEstado] = useState('Pendiente');
   const [horaInicio, setHoraInicio] = useState('');
   const [horaFin, setHoraFin] = useState('');
   const [saving, setSaving] = useState(false);
@@ -87,6 +100,13 @@ export default function DetalleCeremonia() {
   const setFotoError = (mensaje: string) => {
     if (id) setFotoErrorActual({ id, mensaje });
   };
+
+  useEffect(() => {
+    const mensaje = obtenerMensajeAsignacionSesion(location.state);
+    if (!mensaje) return;
+    setAsignacionSesionSuccess(mensaje);
+    navigate(location.pathname, { replace: true, state: null });
+  }, [location.pathname, location.state, navigate]);
 
   const load = useCallback(async () => {
     if (!id) return;
@@ -119,7 +139,14 @@ export default function DetalleCeremonia() {
     try {
       const resultado = await cambiarEstadoCeremonia(id, siguienteEstado);
       setCeremonia((actual) => actual ? { ...actual, estado: resultado.estado } : actual);
-      if (resultado.estado === 'Finalizada') {
+      if (resultado.estado === 'En curso') {
+        const sesionesIniciadas = new Set(resultado.sesionesIniciadas);
+        setSesiones((actuales) => actuales.map((sesion) => (
+          sesionesIniciadas.has(sesion.id)
+            ? { ...sesion, estado: 'En curso' }
+            : sesion
+        )));
+      } else if (resultado.estado === 'Finalizada') {
         setSesiones((actuales) => actuales.map((sesion) => ({
           ...sesion,
           estado: 'Finalizada',
@@ -196,7 +223,6 @@ export default function DetalleCeremonia() {
     try {
       const nuevaSesion = await addSesion(id, {
         nombre: sesionNombre.trim(),
-        estado: sesionEstado as 'Pendiente',
         horaInicio,
         horaFin,
       });
@@ -366,6 +392,11 @@ export default function DetalleCeremonia() {
           Eventos institucionales / Ceremonias de grado / Resumen
         </Typography>
       </Box>
+      {asignacionSesionSuccess && (
+        <Alert severity="success" sx={{ mb: 2 }}>
+          {asignacionSesionSuccess}
+        </Alert>
+      )}
 
       {/* Banner */}
       <Box sx={{
@@ -485,7 +516,9 @@ export default function DetalleCeremonia() {
                     </Typography>
                   )}
                   <Typography sx={{ color: '#5A6A7A', fontSize: '0.85rem' }}>
-                    {s.horaInicio ? `${s.horaInicio} – ${s.horaFin}` : 'Horario por definir'}
+                    {s.horaInicio && s.horaFin
+                      ? `${formatearHora12(s.horaInicio)} – ${formatearHora12(s.horaFin)}`
+                      : 'Horario por definir'}
                   </Typography>
                   <Typography sx={{ color: '#5A6A7A', fontSize: '0.85rem' }}>
                     {s.programas.length ? s.programas.join(', ') : 'Programas por configurar'}
@@ -861,31 +894,24 @@ export default function DetalleCeremonia() {
             </Typography>
             <Typography sx={{ color: '#5A6A7A', fontSize: '0.8rem' }}>Fecha · Lugar</Typography>
           </Box>
-          <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 2, mb: 2 }}>
+          <Box sx={{ display: 'grid', gridTemplateColumns: '1fr', gap: 2, mb: 2 }}>
             <TextField size="small" label="Nombre de referencia (opcional)" value={sesionNombre}
               onChange={(e) => setSesionNombre(e.target.value)} placeholder="Ej. Jornada de la mañana"
               helperText="El número se asigna automáticamente en orden: Sesión 1, Sesión 2, etc."
               sx={{ '& .MuiOutlinedInput-root': { borderRadius: '8px' } }} />
-            <TextField select size="small" label="Estado" value={sesionEstado}
-              onChange={(e) => setSesionEstado(e.target.value)}
-              sx={{ '& .MuiOutlinedInput-root': { borderRadius: '8px' } }}>
-              <MenuItem value="Pendiente">Pendiente</MenuItem>
-              <MenuItem value="En curso">En curso</MenuItem>
-              <MenuItem value="Finalizada">Finalizada</MenuItem>
-            </TextField>
           </Box>
           <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 2, mb: 1 }}>
             <TextField select size="small" label="Hora de inicio" value={horaInicio}
               onChange={(e) => setHoraInicio(e.target.value)}
               sx={{ '& .MuiOutlinedInput-root': { borderRadius: '8px' } }}>
               <MenuItem value="">Seleccionar hora</MenuItem>
-              {HORA_OPTIONS.map((h) => <MenuItem key={h} value={h}>{h}</MenuItem>)}
+              {HORA_OPTIONS.map(({ value, label }) => <MenuItem key={value} value={value}>{label}</MenuItem>)}
             </TextField>
             <TextField select size="small" label="Hora de finalización" value={horaFin}
               onChange={(e) => setHoraFin(e.target.value)}
               sx={{ '& .MuiOutlinedInput-root': { borderRadius: '8px' } }}>
               <MenuItem value="">Seleccionar hora</MenuItem>
-              {HORA_OPTIONS.map((h) => <MenuItem key={h} value={h}>{h}</MenuItem>)}
+              {HORA_OPTIONS.map(({ value, label }) => <MenuItem key={value} value={value}>{label}</MenuItem>)}
             </TextField>
           </Box>
           <Typography sx={{ color: '#5A6A7A', fontSize: '0.8rem' }}>

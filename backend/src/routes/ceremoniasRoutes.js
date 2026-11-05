@@ -19,6 +19,7 @@ import {
   actualizarMaxInvitadosPorGraduando,
   actualizarSesion,
   buscarGraduandosControlIngreso,
+  buscarInvitadosControlIngreso,
   confirmarImportacionGraduandos,
   crearGraduando,
   crearSesion,
@@ -63,6 +64,7 @@ router.post('/:id/graduandos/importacion/confirmar', confirmarImportacionGraduan
 router.get('/:id/invitados', listarInvitadosCeremonia);
 router.get('/:id/control-ingreso', obtenerEstadisticasControlIngreso);
 router.get('/:id/control-ingreso/graduandos', buscarGraduandosControlIngreso);
+router.get('/:id/control-ingreso/invitados', buscarInvitadosControlIngreso);
 router.get(
   '/:id/control-ingreso/graduandos/:graduandoId/invitados',
   listarInvitadosControlIngreso,

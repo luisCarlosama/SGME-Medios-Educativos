@@ -16,6 +16,7 @@ import type {
   EstadisticasControlIngreso,
   ResultadoRegistroIngreso,
   EstadoCeremonia,
+  EstadoSesionConfiguracion,
 } from '../interfaces/ceremonias.interface';
 import type {
   ImportGraduandoRow,
@@ -99,6 +100,11 @@ export interface EspacioOption {
   campus: string;
 }
 
+export interface CampusOption {
+  id_campus: number;
+  nombre: string;
+}
+
 export interface FotoCeremonia {
   slot: number;
   mimeType: string;
@@ -134,8 +140,17 @@ export async function getEventosActivos(): Promise<EventoOption[]> {
   return respuestaCeremonia<EventoOption[]>(respuesta);
 }
 
-export async function getEspaciosActivos(): Promise<EspacioOption[]> {
-  const respuesta = await fetchBackend('/api/reservas/espacios');
+export async function getCampusCeremonias(): Promise<CampusOption[]> {
+  const respuesta = await fetchBackend('/api/reservas/campus');
+  return respuestaCeremonia<CampusOption[]>(respuesta);
+}
+
+export async function getEspaciosActivos(idCampus: string): Promise<EspacioOption[]> {
+  const parametros = new URLSearchParams({
+    id_campus: idCampus,
+    solo_auditorios: 'true',
+  });
+  const respuesta = await fetchBackend(`/api/reservas/espacios?${parametros.toString()}`);
   return respuestaCeremonia<EspacioOption[]>(respuesta);
 }
 
@@ -194,7 +209,12 @@ export async function cambiarEstadoCeremonia(
   ceremoniaId: string,
   estado: EstadoCeremonia,
   motivo?: string,
-): Promise<{ id: string; estado: EstadoCeremonia; sesionesFinalizadas: number }> {
+): Promise<{
+  id: string;
+  estado: EstadoCeremonia;
+  sesionesIniciadas: string[];
+  sesionesFinalizadas: number;
+}> {
   const respuesta = await fetchBackend(
     `/api/ceremonias/${encodeURIComponent(ceremoniaId)}/estado`,
     {
@@ -206,6 +226,7 @@ export async function cambiarEstadoCeremonia(
   return respuestaCeremonia<{
     id: string;
     estado: EstadoCeremonia;
+    sesionesIniciadas: string[];
     sesionesFinalizadas: number;
   }>(respuesta);
 }
@@ -225,7 +246,7 @@ export async function getSesionById(id: string): Promise<Sesion | null> {
 
 export async function addSesion(
   ceremoniaId: string,
-  payload: Partial<Sesion>
+  payload: Pick<Sesion, 'nombre' | 'horaInicio' | 'horaFin'>
 ): Promise<Sesion> {
   const respuesta = await fetchBackend(
     `/api/ceremonias/${encodeURIComponent(ceremoniaId)}/sesiones`,
@@ -240,14 +261,16 @@ export async function addSesion(
 
 export async function updateSesion(
   id: string,
-  payload: Pick<Sesion, 'nombre' | 'estado' | 'horaInicio' | 'horaFin' | 'programas'>
-): Promise<Sesion> {
+  payload: Pick<Sesion, 'nombre' | 'horaInicio' | 'horaFin' | 'programas'> & {
+    estado: EstadoSesionConfiguracion;
+  }
+): Promise<Sesion & { graduandosAsignados: number }> {
   const respuesta = await fetchBackend(`/api/ceremonias/sesiones/${encodeURIComponent(id)}`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
   });
-  return respuestaCeremonia<Sesion>(respuesta);
+  return respuestaCeremonia<Sesion & { graduandosAsignados: number }>(respuesta);
 }
 
 export async function getProgramasActivos(): Promise<string[]> {
@@ -394,6 +417,18 @@ export async function buscarGraduandosControlIngreso(
   return respuestaCeremonia<Graduando[]>(respuesta);
 }
 
+export async function buscarInvitadosControlIngreso(
+  ceremoniaId: string,
+  sesionId: string,
+  search: string
+): Promise<Invitado[]> {
+  const parametros = new URLSearchParams({ sesion: sesionId, search });
+  const respuesta = await fetchBackend(
+    `/api/ceremonias/${encodeURIComponent(ceremoniaId)}/control-ingreso/invitados?${parametros.toString()}`
+  );
+  return respuestaCeremonia<Invitado[]>(respuesta);
+}
+
 export async function getInvitadosControlIngreso(
   ceremoniaId: string,
   sesionId: string,
@@ -510,7 +545,18 @@ export const LUGAR_OPTIONS = [
   'Coliseo',
   'Campus Centro',
 ];
-export const HORA_OPTIONS = [
-  '07:00', '08:00', '09:00', '10:00', '11:00', '12:00',
-  '13:00', '14:00', '15:00', '16:00', '17:00', '18:00',
-];
+export function formatearHora12(hora?: string | null): string {
+  if (!hora) return '';
+  const coincidencia = /^([01]\d|2[0-3]):([0-5]\d)(?::[0-5]\d)?$/.exec(hora);
+  if (!coincidencia) return hora;
+
+  const hora24 = Number(coincidencia[1]);
+  const hora12 = hora24 % 12 || 12;
+  const periodo = hora24 < 12 ? 'AM' : 'PM';
+  return `${String(hora12).padStart(2, '0')}:${coincidencia[2]} ${periodo}`;
+}
+
+export const HORA_OPTIONS = Array.from({ length: 14 }, (_, index) => {
+  const value = `${String(index + 7).padStart(2, '0')}:00`;
+  return { value, label: formatearHora12(value) };
+});

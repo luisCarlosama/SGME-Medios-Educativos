@@ -154,7 +154,7 @@ export default function Invitados() {
           <TextField fullWidth size="small" label="Nombre" value={nombre} onChange={(e) => setNombre(e.target.value)}
             sx={{ mb: 2, '& .MuiOutlinedInput-root': { borderRadius: '8px' } }} />
           <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 2, mb: 1 }}>
-            <TextField size="small" label="Documento" value={documento} onChange={(e) => setDocumento(e.target.value)}
+            <TextField size="small" label="Documento" value={documento} onChange={(e) => setDocumento(e.target.value.replace(/\D/g, ''))}
               sx={{ '& .MuiOutlinedInput-root': { borderRadius: '8px' } }} />
             <TextField select size="small" label="Estado" value={estado} onChange={(e) => setEstado(e.target.value)}
               sx={{ '& .MuiOutlinedInput-root': { borderRadius: '8px' } }}>
