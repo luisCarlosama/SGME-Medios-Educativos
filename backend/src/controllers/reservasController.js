@@ -117,10 +117,10 @@ export const obtenerCatalogosInstitucionales = async (req, res) => {
         ORDER BY nombre
       `),
       pool.query(`
-        SELECT id_grupo, nombre
-        FROM grupo
-        WHERE estado = TRUE
-        ORDER BY nombre
+      SELECT id_departamento, nombre
+      FROM departamento
+      WHERE estado = TRUE
+       ORDER BY nombre
       `),
     ]);
 
@@ -128,7 +128,7 @@ export const obtenerCatalogosInstitucionales = async (req, res) => {
       dependencias: consultas[0].rows,
       programas: consultas[1].rows,
       areas: consultas[2].rows,
-      grupos: consultas[3].rows,
+      departamentos: consultas[3].rows,
     });
   } catch (error) {
     console.error('Error al consultar catálogos institucionales:', error);
@@ -330,7 +330,7 @@ export const crearSolicitud = async (req, res) => {
     id_programa,
     id_dependencia,
     id_area,
-    id_grupo,
+    id_departamento,
     id_espacio,
     fecha_inicio,
     fecha_fin,
@@ -339,7 +339,6 @@ export const crearSolicitud = async (req, res) => {
     nombre_actividad,
     medios_requeridos,
     observaciones,
-    es_recurrente = false,
     frecuencia_recurrencia = null,
     dias_semana = null,
     ocurrencias = [],
@@ -347,10 +346,41 @@ export const crearSolicitud = async (req, res) => {
 
   const tipo = String(tipo_solicitante || '').trim().toLowerCase();
 
+  let es_recurrente = Boolean(req.body.es_recurrente);
+
   if (!['interno', 'externo'].includes(tipo)) {
     return res.status(400).json({
       mensaje: 'El tipo de solicitante debe ser interno o externo.',
     });
+  }
+
+  // Validar fechas según el tipo de solicitante
+  const esRangoFechas = fecha_inicio !== fecha_fin;
+
+  // Los externos solo pueden solicitar reservas de un día
+  if (tipo === 'externo' && esRangoFechas) {
+    return res.status(400).json({
+      mensaje: 'Los solicitantes externos solo pueden reservar para un día.',
+    });
+  }
+
+  // Los externos no pueden realizar solicitudes recurrentes
+  if (tipo === 'externo' && es_recurrente) {
+    return res.status(400).json({
+      mensaje: 'Los solicitantes externos no pueden realizar reservas recurrentes.',
+    });
+  }
+
+  // Una recurrencia interna necesita un rango de fechas
+  if (tipo === 'interno' && es_recurrente && !esRangoFechas) {
+    return res.status(400).json({
+      mensaje: 'Para realizar una reserva recurrente debes seleccionar una fecha inicial y una fecha final diferentes.',
+    });
+  }
+
+  // Un rango de fechas interno implica recurrencia automática
+  if (tipo === 'interno' && esRangoFechas) {
+    es_recurrente = true;
   }
 
   if (
@@ -441,46 +471,69 @@ export const crearSolicitud = async (req, res) => {
       });
     }
 
-    const solicitanteResult = await cliente.query(
-      `
-        INSERT INTO solicitante (
-          nombre,
-          cargo,
-          correo,
-          numero_contacto,
-          tipo_solicitante,
-          identificacion,
-          nombre_entidad,
-          tipo_entidad,
-          ciudad,
-          id_programa,
-          id_dependencia,
-          id_area,
-          id_grupo
-        )
-        VALUES (
-          $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13
-        )
-        RETURNING id_solicitante
-      `,
-      [
-        nombre.trim(),
-        cargo?.trim() || null,
-        correo?.trim() || null,
-        numero_contacto?.trim() || null,
-        tipo,
-        identificacion?.trim() || null,
-        tipo === 'externo' ? nombre_entidad?.trim() || null : null,
-        tipo === 'externo' ? tipo_entidad?.trim() || null : null,
-        tipo === 'externo' ? ciudad?.trim() || null : null,
-        tipo === 'interno' ? id_programa || null : null,
-        tipo === 'interno' ? id_dependencia || null : null,
-        tipo === 'interno' ? id_area || null : null,
-        tipo === 'interno' ? id_grupo || null : null,
-      ]
-    );
 
-    const idSolicitante = solicitanteResult.rows[0].id_solicitante;
+    let idSolicitante;
+
+    if (tipo === 'interno') {
+      const existente = await cliente.query(
+        `
+    SELECT id_solicitante
+    FROM solicitante
+    WHERE LOWER(TRIM(correo)) = LOWER(TRIM($1))
+      AND LOWER(TRIM(tipo_solicitante)) = LOWER(TRIM($2))
+    LIMIT 1
+  `,
+        [correo.trim(), tipo]
+      );
+
+      if (existente.rowCount > 0) {
+        idSolicitante = existente.rows[0].id_solicitante;
+      }
+    }
+
+    if (!idSolicitante) {
+      const solicitanteResult = await cliente.query(
+        `
+      INSERT INTO solicitante (
+        nombre,
+        cargo,
+        correo,
+        numero_contacto,
+        tipo_solicitante,
+        identificacion,
+        nombre_entidad,
+        tipo_entidad,
+        ciudad,
+        id_programa,
+        id_dependencia,
+        id_area,
+        id_departamento
+      )
+      VALUES (
+        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13
+      )
+      RETURNING id_solicitante
+    `,
+        [
+          nombre.trim(),
+          cargo?.trim() || null,
+          correo?.trim() || null,
+          numero_contacto?.trim() || null,
+          tipo,
+          identificacion?.trim() || null,
+          tipo === 'externo' ? nombre_entidad?.trim() || null : null,
+          tipo === 'externo' ? tipo_entidad?.trim() || null : null,
+          tipo === 'externo' ? ciudad?.trim() || null : null,
+          tipo === 'interno' ? id_programa || null : null,
+          tipo === 'interno' ? id_dependencia || null : null,
+          tipo === 'interno' ? id_area || null : null,
+          tipo === 'interno' ? id_departamento || null : null,
+        ]
+      );
+
+      idSolicitante = solicitanteResult.rows[0].id_solicitante;
+    }
+
     const codigo = `RES-${Date.now()}-${randomUUID()
       .slice(0, 6)
       .toUpperCase()}`;
@@ -711,7 +764,7 @@ export const obtenerSolicitudPorId = async (req, res) => {
         s.id_programa,
         s.id_dependencia,
         s.id_area,
-        s.id_grupo,
+        s.id_departamento,
 
         e.id_espacio,
         e.nombre AS espacio,
@@ -722,7 +775,7 @@ export const obtenerSolicitudPorId = async (req, res) => {
         p.nombre AS programa,
         d.nombre AS dependencia,
         a.nombre AS area,
-        g.nombre AS grupo
+        dep.nombre AS departamento
 
       FROM solicitud_reserva sr
       INNER JOIN solicitante s ON s.id_solicitante = sr.id_solicitante
@@ -732,7 +785,7 @@ export const obtenerSolicitudPorId = async (req, res) => {
       LEFT JOIN programa p ON p.id_programa = s.id_programa
       LEFT JOIN dependencia d ON d.id_dependencia = s.id_dependencia
       LEFT JOIN area a ON a.id_area = s.id_area
-      LEFT JOIN grupo g ON g.id_grupo = s.id_grupo
+      LEFT JOIN departamento dep ON dep.id_departamento = s.id_departamento
       WHERE sr.id_solicitud = $1
       `,
       [idSolicitud]
@@ -794,7 +847,7 @@ export const obtenerSolicitudPorId = async (req, res) => {
         programa: fila.programa,
         dependencia: fila.dependencia,
         area: fila.area,
-        grupo: fila.grupo,
+        departamento: fila.departamento,
       },
 
       espacio: {
@@ -918,7 +971,6 @@ export const actualizarSolicitud = async (req, res) => {
     nombre_actividad,
     medios_requeridos,
     observaciones,
-    es_recurrente = false,
     frecuencia_recurrencia = null,
     dias_semana = null,
     ocurrencias = [],
@@ -935,7 +987,7 @@ export const actualizarSolicitud = async (req, res) => {
     id_programa,
     id_dependencia,
     id_area,
-    id_grupo,
+    id_departamento,
 
     // Espacio
     id_espacio,
@@ -1056,7 +1108,7 @@ export const actualizarSolicitud = async (req, res) => {
         id_programa = $9,
         id_dependencia = $10,
         id_area = $11,
-        id_grupo = $12
+        id_departamento  = $12
       WHERE id_solicitante = $13
       `,
       [
@@ -1071,7 +1123,7 @@ export const actualizarSolicitud = async (req, res) => {
         id_programa || null,
         id_dependencia || null,
         id_area || null,
-        id_grupo || null,
+        id_departamento || null,
         idSolicitante,
       ]
     );
@@ -1152,5 +1204,193 @@ export const actualizarSolicitud = async (req, res) => {
     });
   } finally {
     cliente.release();
+  }
+};
+
+// Listar todas las solicitudes (con filtros opcionales)
+export const listarSolicitudes = async (req, res) => {
+  try {
+    const {
+      busqueda,
+      estado,
+      campus,
+      tipo,
+      fecha,
+      espacio,
+    } = req.query;
+
+    const condiciones = [];
+    const valores = [];
+
+    if (busqueda) {
+      valores.push(`%${busqueda}%`);
+      condiciones.push(`(
+        sr.codigo_solicitud ILIKE $${valores.length}
+        OR s.nombre ILIKE $${valores.length}
+      )`);
+    }
+
+    if (estado) {
+      valores.push(estado);
+      condiciones.push(`sr.estado = $${valores.length}`);
+    }
+
+    if (tipo) {
+      valores.push(tipo.toLowerCase());
+      condiciones.push(`s.tipo_solicitante = $${valores.length}`);
+    }
+
+    if (fecha) {
+      valores.push(fecha);
+      condiciones.push(`sr.fecha_inicio = $${valores.length}`);
+    }
+
+    if (espacio) {
+      valores.push(`%${espacio}%`);
+      condiciones.push(`e.nombre ILIKE $${valores.length}`);
+    }
+
+    if (campus) {
+      const campusLimpio = String(campus).replace(/^Campus\s+/i, "").trim();
+      valores.push(`%${campusLimpio}%`);
+      condiciones.push(`c.nombre ILIKE $${valores.length}`);
+    }
+
+    const where = condiciones.length > 0
+      ? `WHERE ${condiciones.join(' AND ')}`
+      : '';
+
+    const resultado = await pool.query(
+      `
+      SELECT
+        sr.id_solicitud AS id,
+        sr.codigo_solicitud AS codigo,
+        s.nombre AS solicitante,
+        s.tipo_solicitante AS tipo,
+        e.nombre AS espacio,
+        sr.fecha_inicio AS fecha,
+        sr.hora_inicio,
+        sr.hora_fin,
+        c.nombre AS campus,
+        sr.estado
+      FROM solicitud_reserva sr
+      INNER JOIN solicitante s ON s.id_solicitante = sr.id_solicitante
+      INNER JOIN espacio e ON e.id_espacio = sr.id_espacio
+      INNER JOIN campus c ON c.id_campus = e.id_campus
+      ${where}
+      ORDER BY sr.fecha_registro DESC
+      LIMIT 100
+      `,
+      valores
+    );
+
+    return res.json(resultado.rows);
+  } catch (error) {
+    console.error('Error al listar solicitudes:', error);
+    return res.status(500).json({
+      mensaje: 'No se pudieron obtener las solicitudes.',
+    });
+  }
+};
+// Listar agenda (solo aprobadas vigentes)
+export const listarAgenda = async (req, res) => {
+  try {
+    const {
+      busqueda,
+      fecha,
+      campus,
+      tipo_espacio,
+      espacio,
+      tipo,
+      hora_inicio,
+      hora_fin,
+    } = req.query;
+
+    const condiciones = [
+      `sr.estado = 'Aprobada'`,
+      `sr.fecha_fin >= CURRENT_DATE`,
+    ];
+    const valores = [];
+
+    if (busqueda) {
+      valores.push(`%${busqueda}%`);
+      condiciones.push(`(
+        sr.codigo_solicitud ILIKE $${valores.length}
+        OR s.nombre ILIKE $${valores.length}
+        OR sr.nombre_actividad ILIKE $${valores.length}
+        OR e.nombre ILIKE $${valores.length}
+      )`);
+    }
+
+    if (fecha) {
+      valores.push(fecha);
+      condiciones.push(`sr.fecha_inicio <= $${valores.length}::date AND sr.fecha_fin >= $${valores.length}::date`);
+    }
+
+    if (campus) {
+      valores.push(`%${campus}%`);
+      condiciones.push(`c.nombre ILIKE $${valores.length}`);
+    }
+
+    if (tipo_espacio) {
+      valores.push(Number(tipo_espacio));
+      condiciones.push(`e.id_tipo_espacio = $${valores.length}`);
+    }
+
+    if (espacio) {
+      valores.push(Number(espacio));
+      condiciones.push(`e.id_espacio = $${valores.length}`);
+    }
+
+    if (tipo) {
+      valores.push(String(tipo).toLowerCase());
+      condiciones.push(`s.tipo_solicitante = $${valores.length}`);
+    }
+
+    if (hora_inicio) {
+      valores.push(hora_inicio);
+      condiciones.push(`sr.hora_inicio >= $${valores.length}::time`);
+    }
+
+    if (hora_fin) {
+      valores.push(hora_fin);
+      condiciones.push(`sr.hora_fin <= $${valores.length}::time`);
+    }
+
+    const where = `WHERE ${condiciones.join(' AND ')}`;
+
+    const resultado = await pool.query(
+      `
+      SELECT
+        sr.id_solicitud AS id,
+        sr.codigo_solicitud AS codigo,
+        sr.nombre_actividad AS actividad,
+        s.tipo_solicitante AS tipo,
+        s.nombre AS solicitante,
+        e.nombre AS espacio,
+        c.nombre AS campus,
+        sr.fecha_inicio AS fecha,
+        sr.fecha_fin,
+        sr.hora_inicio,
+        sr.hora_fin,
+        sr.estado,
+        sr.es_recurrente
+      FROM solicitud_reserva sr
+      INNER JOIN solicitante s ON s.id_solicitante = sr.id_solicitante
+      INNER JOIN espacio e ON e.id_espacio = sr.id_espacio
+      INNER JOIN campus c ON c.id_campus = e.id_campus
+      ${where}
+      ORDER BY sr.fecha_inicio ASC, sr.hora_inicio ASC
+      LIMIT 200
+      `,
+      valores
+    );
+
+    return res.json(resultado.rows);
+  } catch (error) {
+    console.error('Error al listar agenda:', error);
+    return res.status(500).json({
+      mensaje: 'No se pudo obtener la agenda.',
+    });
   }
 };

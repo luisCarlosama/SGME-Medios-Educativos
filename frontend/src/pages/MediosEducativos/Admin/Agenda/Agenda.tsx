@@ -1,303 +1,568 @@
-/**
- * Pantalla: Admin – Agenda por campus
- * Diseño 1:1 del prototipo de Figma (Todos / Centro / Santiago / San Damián).
- * Datos ficticios preparados para futuro enlace a API.
- */
-
-import { useState, useEffect, useCallback } from 'react';
+import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import {
+  Alert,
   Box,
-  Typography,
   Button,
+  Chip,
+  CircularProgress,
+  MenuItem,
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableRow,
   TextField,
-  InputAdornment,
-  Pagination,
-} from '@mui/material';
-import AddIcon from '@mui/icons-material/Add';
-import SearchIcon from '@mui/icons-material/Search';
-import AdminLayout from '../../../../components/layout/AdminLayout';
-import CampusTabs from './components/CampusTabs';
-import AgendaFilters from './components/AgendaFilters';
-import AgendaTable from './components/AgendaTable';
-import type {
-  ReservaAgenda,
-  AgendaFilters as Filters,
-  CampusAgenda,
-} from './interfaces/agenda.interface';
-import { getAgenda } from './services/agenda.service';
+  Typography,
+} from "@mui/material";
+import * as XLSX from "xlsx";
+import jsPDF from "jspdf";
+import autoTable from "jspdf-autotable";
+import AdminLayout from "../../../../components/layout/AdminLayout";
+import ModalExportar from "../Dashboard/components/ModalExportar";
+import { listarAgenda } from "./services/agenda.service";
+import { obtenerCampus, obtenerTiposEspacio, obtenerEspacios } from "../../Public/Reserva/services/reservas.service";
 
-const PAGE_SIZE = 7;
+const estadoStyles: Record<string, { bg: string; color: string }> = {
+  Aprobada: { bg: "#D1FAE5", color: "#047857" },
+  Activa: { bg: "#D1FAE5", color: "#047857" },
+  Pendiente: { bg: "#FEF3C7", color: "#B45309" },
+  Bloqueado: { bg: "#E5E7EB", color: "#4B5563" },
+};
+
+function formatearFecha(fecha: string): string {
+  if (!fecha) return "—";
+  const solo = String(fecha).split("T")[0];
+  const [a, m, d] = solo.split("-");
+  return `${d}/${m}/${a}`;
+}
+
+function formatearHora(hora: string): string {
+  if (!hora) return "";
+  return String(hora).slice(0, 5);
+}
 
 export default function Agenda() {
-  const [reservas, setReservas] = useState<ReservaAgenda[]>([]);
-  const [total, setTotal] = useState(0);
+  const navigate = useNavigate();
+
+  const [modalExportar, setModalExportar] = useState(false);
+
+  const [reservas, setReservas] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  const [campus, setCampus] = useState<CampusAgenda>('Todos');
-  const [filters, setFilters] = useState<Filters>({});
-  const [search, setSearch] = useState('');
-  const [page, setPage] = useState(1);
+  const [error, setError] = useState("");
 
-  const loadData = useCallback(
-    async (campusTab: CampusAgenda, currentFilters: Filters, searchText: string) => {
-      setLoading(true);
-      try {
-        const response = await getAgenda({
-          ...currentFilters,
-          campus: campusTab,
-          search: searchText || undefined,
-        });
-        setReservas(response.data);
-        setTotal(response.total);
-        setPage(1);
-      } catch (error) {
-        console.error('Error al cargar agenda:', error);
-        setReservas([]);
-        setTotal(0);
-      } finally {
-        setLoading(false);
-      }
-    },
-    []
-  );
+  const [campusLista, setCampusLista] = useState<any[]>([]);
+  const [tiposEspacio, setTiposEspacio] = useState<any[]>([]);
+  const [espacios, setEspacios] = useState<any[]>([]);
 
-  useEffect(() => {
-    loadData(campus, filters, search);
-  }, [campus]); // solo recarga al cambiar de campus; Aplicar/buscar se disparan manualmente
+  const [campusTab, setCampusTab] = useState("Todos");
+  const [fecha, setFecha] = useState("");
+  const [idTipoEspacio, setIdTipoEspacio] = useState("");
+  const [idEspacio, setIdEspacio] = useState("");
+  const [tipo, setTipo] = useState("");
+  const [busqueda, setBusqueda] = useState("");
 
-  const handleCampusChange = (newCampus: CampusAgenda) => {
-    setCampus(newCampus);
-  };
-
-  const handleApply = () => {
-    loadData(campus, filters, search);
-  };
-
-  const handleClear = () => {
-    const empty: Filters = {};
-    setFilters(empty);
-    setSearch('');
-    loadData(campus, empty, '');
-  };
-
-  const handleSearchKey = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter') {
-      loadData(campus, filters, search);
+  const cargarCatalogos = async () => {
+    try {
+      const [c, t] = await Promise.all([obtenerCampus(), obtenerTiposEspacio()]);
+      setCampusLista(
+        c.map((x: any) => ({
+          id: x.id_campus,
+          nombre: x.nombre,
+        }))
+      );
+      setTiposEspacio(
+        t.map((x: any) => ({
+          id: x.id_tipo_espacio,
+          nombre: x.nombre,
+        }))
+      );
+    } catch {
+      // silencioso
     }
   };
 
-  // Paginación client-side sobre el resultado filtrado
-  const pageCount = Math.max(1, Math.ceil(reservas.length / PAGE_SIZE));
-  const paginated = reservas.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+  const cargarAgenda = async (filtrosExtra: Record<string, string> = {}) => {
+    setLoading(true);
+    setError("");
+    try {
+      const filtros: Record<string, string> = { ...filtrosExtra };
 
-  const countLabel =
-    campus === 'Todos'
-      ? `${total} reservas agendadas`
-      : `${total} reservas en Campus ${campus}`;
+      // Solo agrega del estado lo que NO venga en filtrosExtra
+      if (!("campus" in filtrosExtra) && campusTab && campusTab !== "Todos") {
+        filtros.campus = campusTab;
+      }
+      if (!("fecha" in filtrosExtra) && fecha) filtros.fecha = fecha;
+      if (!("tipo_espacio" in filtrosExtra) && idTipoEspacio) {
+        filtros.tipo_espacio = idTipoEspacio;
+      }
+      if (!("espacio" in filtrosExtra) && idEspacio) filtros.espacio = idEspacio;
+      if (!("tipo" in filtrosExtra) && tipo) filtros.tipo = tipo;
+      if (!("busqueda" in filtrosExtra) && busqueda.trim()) {
+        filtros.busqueda = busqueda.trim();
+      }
+
+      // Si campus viene vacío explícito, no lo mandes
+      if (filtros.campus === "") delete filtros.campus;
+
+      const data = await listarAgenda(filtros);
+      setReservas(data || []);
+    } catch (err: unknown) {
+      setError(
+        err instanceof Error ? err.message : "No se pudo cargar la agenda."
+      );
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    cargarCatalogos();
+    cargarAgenda();
+  }, []);
+
+  useEffect(() => {
+    if (!idTipoEspacio && !campusTab) {
+      setEspacios([]);
+      return;
+    }
+    const campusId = campusLista.find((c) => c.nombre === campusTab)?.id;
+    obtenerEspacios(
+      campusTab !== "Todos" && campusId ? String(campusId) : undefined,
+      idTipoEspacio || undefined
+    )
+      .then((lista) =>
+        setEspacios(
+          lista.map((x: any) => ({
+            id: x.id_espacio,
+            nombre: x.nombre,
+          }))
+        )
+      )
+      .catch(() => setEspacios([]));
+  }, [idTipoEspacio, campusTab, campusLista]);
+
+  const handleAplicar = () => cargarAgenda();
+
+  const handleLimpiar = () => {
+    setCampusTab("Todos");
+    setFecha("");
+    setIdTipoEspacio("");
+    setIdEspacio("");
+    setTipo("");
+    setBusqueda("");
+    cargarAgenda({});
+  };
+
+  const handleExportar = async (
+    _tipo: "externas" | "internas" | "todas",
+    formato: "xlsx" | "pdf"
+  ) => {
+    if (!reservas.length) {
+      alert("No hay reservas para exportar.");
+      return;
+    }
+
+    const filas = reservas.map((r, i) => ({
+      "N°": i + 1,
+      Código: r.codigo,
+      Actividad: r.actividad,
+      Tipo: r.tipo === "interno" ? "Institucional" : "Externa",
+      Solicitante: r.solicitante,
+      Espacio: r.espacio,
+      Campus: r.campus,
+      "Fecha reserva": formatearFecha(r.fecha),
+      Horario: `${formatearHora(r.hora_inicio)} - ${formatearHora(r.hora_fin)}`,
+      Estado: r.estado,
+    }));
+
+    const fechaGen = new Date().toISOString().slice(0, 10);
+
+    if (formato === "xlsx") {
+      const wb = XLSX.utils.book_new();
+      const ws = XLSX.utils.json_to_sheet(filas);
+      XLSX.utils.book_append_sheet(wb, ws, "Agenda");
+      XLSX.writeFile(wb, `SGME_Agenda_${fechaGen}.xlsx`);
+      return;
+    }
+
+    const doc = new jsPDF({ orientation: "landscape" });
+    doc.setFontSize(14);
+    doc.text("SGME - Agenda de reservas", 14, 15);
+    doc.setFontSize(10);
+    doc.text(`Generado: ${new Date().toLocaleString("es-CO")}`, 14, 22);
+
+    autoTable(doc, {
+      startY: 28,
+      head: [Object.keys(filas[0])],
+      body: filas.map((f) => Object.values(f)),
+      styles: { fontSize: 7 },
+      headStyles: { fillColor: [30, 58, 95] },
+    });
+
+    doc.save(`SGME_Agenda_${fechaGen}.pdf`);
+  };
+
+  const tabsCampus = ["Todos", ...campusLista.map((c) => c.nombre)];
 
   return (
     <AdminLayout>
-      {/* Header */}
-      <Box
-        sx={{
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'flex-start',
-          mb: 2.5,
-          flexWrap: 'wrap',
-          gap: 2,
-        }}
-      >
-        <Box>
-          <Typography
-            variant="h4"
-            sx={{
-              fontWeight: 700,
-              color: '#0B1A2A',
-              fontSize: '1.75rem',
-              mb: 0.5,
-            }}
-          >
-            Agenda por campus
-          </Typography>
-          <Typography sx={{ color: '#5A6A7A', fontSize: '0.95rem' }}>
-            Consulta y gestiona la agenda de reservas programadas por campus y espacio.
-          </Typography>
-        </Box>
-
-        <Button
-          variant="contained"
-          startIcon={<AddIcon />}
+      <Box sx={{ width: "100%" }}>
+        {/* Header */}
+        <Box
           sx={{
-            backgroundColor: '#E30613',
-            textTransform: 'none',
-            fontWeight: 600,
-            borderRadius: '8px',
-            px: 2.5,
-            py: 1.1,
-            fontSize: '0.9rem',
-            boxShadow: 'none',
-            '&:hover': {
-              backgroundColor: '#C10510',
-              boxShadow: 'none',
-            },
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "flex-start",
+            mb: 3,
+            flexWrap: "wrap",
+            gap: 2,
           }}
         >
-          + Nueva reserva
-        </Button>
-      </Box>
+          <Box>
+            <Typography
+              sx={{ fontWeight: 700, fontSize: "1.75rem", color: "#0F172A", mb: 0.5 }}
+            >
+              Agenda por campus
+            </Typography>
+            <Typography sx={{ color: "#64748B", fontSize: "0.95rem" }}>
+              Consulta y gestiona la agenda de reservas programadas por campus y espacio.
+            </Typography>
+          </Box>
 
-      {/* Tabs de campus */}
-      <CampusTabs value={campus} onChange={handleCampusChange} />
-
-      {/* Filtros */}
-      <AgendaFilters
-        filters={filters}
-        onChange={setFilters}
-        onApply={handleApply}
-        onClear={handleClear}
-      />
-
-      {/* Buscador + contador */}
-      <Box
-        sx={{
-          display: 'flex',
-          flexWrap: 'wrap',
-          gap: 2,
-          alignItems: 'center',
-          mb: 2.5,
-        }}
-      >
-        <TextField
-          size="small"
-          placeholder="Buscar por actividad, solicitante, espacio o código de reserva"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          onKeyDown={handleSearchKey}
-          sx={{
-            flex: 1,
-            minWidth: 280,
-            '& .MuiOutlinedInput-root': {
-              borderRadius: '10px',
-              backgroundColor: '#FFFFFF',
-            },
-          }}
-          InputProps={{
-            startAdornment: (
-              <InputAdornment position="start">
-                <SearchIcon sx={{ color: '#9AA5B5', fontSize: 20 }} />
-              </InputAdornment>
-            ),
-          }}
-        />
-        <Typography
-          sx={{
-            color: '#1565C0',
-            fontWeight: 600,
-            fontSize: '0.9rem',
-            whiteSpace: 'nowrap',
-          }}
-        >
-          {countLabel}
-        </Typography>
-      </Box>
-
-      {/* Tabla */}
-      <AgendaTable reservas={paginated} loading={loading} />
-
-      {/* Footer: contador + paginación + exportar */}
-      <Box
-        sx={{
-          display: 'flex',
-          flexWrap: 'wrap',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          mt: 2,
-          gap: 2,
-        }}
-      >
-        <Typography sx={{ color: '#5A6A7A', fontSize: '0.875rem' }}>
-          Mostrando {paginated.length} de {total} reservas agendadas
-        </Typography>
-
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-          <Pagination
-            count={pageCount}
-            page={page}
-            onChange={(_, p) => setPage(p)}
-            size="small"
-            color="primary"
-            sx={{
-              '& .MuiPaginationItem-root': {
-                fontWeight: 500,
-              },
-            }}
-          />
-          <Button
-            variant="outlined"
-            sx={{
-              textTransform: 'none',
-              fontWeight: 500,
-              borderRadius: '8px',
-              borderColor: '#C5CDD8',
-              color: '#1A2A3A',
-              px: 2,
-              '&:hover': {
-                borderColor: '#0B3A5C',
-                backgroundColor: 'rgba(11,58,92,0.04)',
-              },
-            }}
-          >
-            Exportar agenda
-          </Button>
-        </Box>
-      </Box>
-
-      {/* Leyenda de estados */}
-      <Box
-        sx={{
-          mt: 2.5,
-          backgroundColor: '#FFFFFF',
-          borderRadius: '10px',
-          border: '1px solid #E5EAF0',
-          px: 2.5,
-          py: 1.75,
-          display: 'flex',
-          flexWrap: 'wrap',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          gap: 2,
-        }}
-      >
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, flexWrap: 'wrap' }}>
-          <Typography sx={{ color: '#5A6A7A', fontSize: '0.85rem', fontWeight: 500 }}>
-            Estados:
-          </Typography>
-          {[
-            { label: 'Aprobada', bg: '#E6F4EA', color: '#1B7A3D' },
-            { label: 'Activa', bg: '#E8F5E9', color: '#2E7D32' },
-            { label: 'Pendiente', bg: '#FFF4E5', color: '#B76E00' },
-            { label: 'Bloqueado', bg: '#F0F2F5', color: '#5A6A7A' },
-          ].map((s) => (
-            <Box
-              key={s.label}
+          <Box sx={{ display: "flex", gap: 1.5, flexWrap: "wrap" }}>
+            <Button
+              variant="outlined"
+              onClick={() => setModalExportar(true)}
               sx={{
-                backgroundColor: s.bg,
-                color: s.color,
+                textTransform: "none",
                 fontWeight: 600,
-                fontSize: '0.75rem',
-                px: 1.5,
-                py: 0.4,
-                borderRadius: '6px',
+                borderRadius: "8px",
+                borderColor: "#CBD5E1",
+                color: "#334155",
               }}
             >
-              {s.label}
-            </Box>
+              Exportar agenda
+            </Button>
+            <Button
+              variant="contained"
+              onClick={() => navigate("/reserva")}
+              sx={{
+                backgroundColor: "#E30613",
+                textTransform: "none",
+                fontWeight: 600,
+                borderRadius: "8px",
+                boxShadow: "none",
+                "&:hover": { backgroundColor: "#C10510", boxShadow: "none" },
+              }}
+            >
+              + Nueva reserva
+            </Button>
+          </Box>
+        </Box>
+
+        {/* Tabs campus */}
+        <Box sx={{ display: "flex", gap: 1, mb: 2.5, flexWrap: "wrap" }}>
+          {tabsCampus.map((nombre) => (
+            <Button
+              key={nombre}
+              onClick={() => {
+                setCampusTab(nombre);
+                cargarAgenda({
+                  campus: nombre === "Todos" ? "" : nombre,
+                });
+              }}
+              sx={{
+                textTransform: "none",
+                borderRadius: "20px",
+                px: 2.5,
+                py: 0.75,
+                fontWeight: 600,
+                backgroundColor: campusTab === nombre ? "#E30613" : "#FFFFFF",
+                color: campusTab === nombre ? "#FFFFFF" : "#334155",
+                border: campusTab === nombre ? "none" : "1px solid #E2E8F0",
+                boxShadow: "none",
+                "&:hover": {
+                  backgroundColor: campusTab === nombre ? "#C10510" : "#F8FAFC",
+                  boxShadow: "none",
+                },
+              }}
+            >
+              {nombre}
+            </Button>
           ))}
         </Box>
-        <Typography sx={{ color: '#5A6A7A', fontSize: '0.85rem' }}>
-          Selecciona “Ver detalle” para consultar la solicitud asociada.
+
+        {/* Filtros */}
+        <Box
+          sx={{
+            backgroundColor: "#FFFFFF",
+            border: "1px solid #E2E8F0",
+            borderRadius: "12px",
+            p: 2,
+            mb: 2,
+          }}
+        >
+          <Typography sx={{ fontWeight: 600, fontSize: "0.9rem", mb: 1.5, color: "#0F172A" }}>
+            Filtros de agenda
+          </Typography>
+
+          <Box
+            sx={{
+              display: "grid",
+              gridTemplateColumns: {
+                xs: "1fr",
+                sm: "repeat(2, 1fr)",
+                md: "repeat(3, 1fr)",
+                lg: "repeat(6, 1fr)",
+              },
+              gap: 1.5,
+              mb: 1.5,
+            }}
+          >
+            <TextField
+              size="small"
+              type="date"
+              label="Fecha"
+              value={fecha}
+              onChange={(e) => setFecha(e.target.value)}
+              InputLabelProps={{ shrink: true }}
+              sx={{
+                minWidth: 150,
+                "& input": { color: fecha ? "#0F172A" : "#94A3B8" },
+              }}
+            />
+            <TextField
+              select
+              size="small"
+              label="Tipo de espacio"
+              value={idTipoEspacio}
+              onChange={(e) => {
+                setIdTipoEspacio(e.target.value);
+                setIdEspacio("");
+              }}
+            >
+              <MenuItem value="">Todos</MenuItem>
+              {tiposEspacio.map((t) => (
+                <MenuItem key={t.id} value={t.id}>
+                  {t.nombre}
+                </MenuItem>
+              ))}
+            </TextField>
+            <TextField
+              select
+              size="small"
+              label="Espacio"
+              value={idEspacio}
+              onChange={(e) => setIdEspacio(e.target.value)}
+            >
+              <MenuItem value="">Todos</MenuItem>
+              {espacios.map((e) => (
+                <MenuItem key={e.id} value={e.id}>
+                  {e.nombre}
+                </MenuItem>
+              ))}
+            </TextField>
+            <TextField
+              select
+              size="small"
+              label="Tipo de solicitud"
+              value={tipo}
+              onChange={(e) => setTipo(e.target.value)}
+            >
+              <MenuItem value="">Todas</MenuItem>
+              <MenuItem value="interno">Institucional</MenuItem>
+              <MenuItem value="externo">Externa</MenuItem>
+            </TextField>
+            <Button
+              variant="contained"
+              onClick={handleAplicar}
+              sx={{
+                backgroundColor: "#1E3A5F",
+                textTransform: "none",
+                fontWeight: 600,
+                borderRadius: "8px",
+                boxShadow: "none",
+                "&:hover": { backgroundColor: "#0F2744", boxShadow: "none" },
+              }}
+            >
+              Aplicar
+            </Button>
+            <Button
+              variant="outlined"
+              onClick={handleLimpiar}
+              sx={{
+                textTransform: "none",
+                borderRadius: "8px",
+                borderColor: "#E2E8F0",
+                color: "#64748B",
+              }}
+            >
+              Limpiar
+            </Button>
+          </Box>
+
+          <Box
+            sx={{
+              display: "flex",
+              gap: 2,
+              alignItems: "center",
+              flexWrap: "wrap",
+            }}
+          >
+            <TextField
+              size="small"
+              placeholder="Buscar por actividad, solicitante, espacio o código"
+              value={busqueda}
+              onChange={(e) => setBusqueda(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && handleAplicar()}
+              sx={{ flex: 1, minWidth: 240 }}
+            />
+            <Typography sx={{ color: "#64748B", fontSize: "0.85rem" }}>
+              {reservas.length} reservas agendadas
+            </Typography>
+          </Box>
+        </Box>
+
+        {error && (
+          <Alert severity="error" sx={{ mb: 2 }}>
+            {error}
+          </Alert>
+        )}
+
+        {/* Tabla */}
+        <TableContainer
+          sx={{
+            backgroundColor: "#FFFFFF",
+            borderRadius: "12px",
+            border: "1px solid #E2E8F0",
+            overflow: "hidden",
+          }}
+        >
+          <Table sx={{ width: "100%", tableLayout: "fixed" }}>
+            <TableHead>
+              <TableRow sx={{ backgroundColor: "#1E3A5F" }}>
+                {[
+                  "Código",
+                  "Actividad",
+                  "Tipo",
+                  "Solicitante",
+                  "Espacio",
+                  "Campus",
+                  "Fecha",
+                  "Horario",
+                  "Estado",
+                  "Acción",
+                ].map((h) => (
+                  <TableCell
+                    key={h}
+                    sx={{
+                      color: "#FFFFFF",
+                      fontWeight: 600,
+                      fontSize: "0.78rem",
+                      py: 1.5,
+                      px: 1.25,
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    {h}
+                  </TableCell>
+                ))}
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {loading ? (
+                <TableRow>
+                  <TableCell colSpan={10} sx={{ textAlign: "center", py: 5 }}>
+                    <CircularProgress size={26} />
+                  </TableCell>
+                </TableRow>
+              ) : reservas.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={10} sx={{ textAlign: "center", py: 5, color: "#64748B" }}>
+                    No hay reservas aprobadas vigentes.
+                  </TableCell>
+                </TableRow>
+              ) : (
+                reservas.map((r) => (
+                  <TableRow
+                    key={r.id}
+                    sx={{
+                      "&:hover": { backgroundColor: "#F8FAFC" },
+                      "& td": { borderBottom: "1px solid #F1F5F9" },
+                    }}
+                  >
+                    <TableCell sx={{ fontWeight: 600, fontSize: "0.8rem", py: 1.25, px: 1.25 }}>
+                      {r.codigo}
+                    </TableCell>
+                    <TableCell sx={{ fontSize: "0.8rem", py: 1.25, px: 1.25 }}>
+                      {r.actividad}
+                    </TableCell>
+                    <TableCell sx={{ fontSize: "0.8rem", py: 1.25, px: 1.25 }}>
+                      {r.tipo === "interno" ? "Interna" : "Externa"}
+                    </TableCell>
+                    <TableCell sx={{ fontSize: "0.8rem", py: 1.25, px: 1.25 }}>
+                      {r.solicitante}
+                    </TableCell>
+                    <TableCell sx={{ fontSize: "0.8rem", py: 1.25, px: 1.25 }}>
+                      {r.espacio}
+                    </TableCell>
+                    <TableCell sx={{ fontSize: "0.8rem", py: 1.25, px: 1.25 }}>
+                      {r.campus}
+                    </TableCell>
+                    <TableCell sx={{ fontSize: "0.8rem", py: 1.25, px: 1.25, whiteSpace: "nowrap" }}>
+                      {formatearFecha(r.fecha)}
+                    </TableCell>
+                    <TableCell sx={{ fontSize: "0.8rem", py: 1.25, px: 1.25, whiteSpace: "nowrap" }}>
+                      {formatearHora(r.hora_inicio)}–{formatearHora(r.hora_fin)}
+                    </TableCell>
+                    <TableCell sx={{ py: 1.25, px: 1.25 }}>
+                      <Chip
+                        label={r.estado}
+                        size="small"
+                        sx={{
+                          backgroundColor: estadoStyles[r.estado]?.bg ?? "#F3F4F6",
+                          color: estadoStyles[r.estado]?.color ?? "#4B5563",
+                          fontWeight: 600,
+                          fontSize: "0.7rem",
+                          height: 22,
+                        }}
+                      />
+                    </TableCell>
+                    <TableCell sx={{ py: 1.25, px: 1.25 }}>
+                      <Button
+                        size="small"
+                        onClick={() => navigate(`/admin/solicitudes/${r.id}`)}
+                        sx={{
+                          textTransform: "none",
+                          fontWeight: 600,
+                          color: "#2563EB",
+                          fontSize: "0.8rem",
+                          minWidth: "auto",
+                          px: 0.5,
+                        }}
+                      >
+                        Ver →
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                ))
+              )}
+            </TableBody>
+          </Table>
+        </TableContainer>
+
+        <Typography sx={{ mt: 1.5, color: "#64748B", fontSize: "0.85rem" }}>
+          Mostrando {reservas.length} reserva{reservas.length === 1 ? "" : "s"} agendada
+          {reservas.length === 1 ? "" : "s"}
         </Typography>
       </Box>
+      <ModalExportar
+        open={modalExportar}
+        onClose={() => setModalExportar(false)}
+        onExportar={handleExportar}
+      />
     </AdminLayout>
   );
 }

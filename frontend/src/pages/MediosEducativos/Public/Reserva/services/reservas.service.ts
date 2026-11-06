@@ -54,7 +54,7 @@ export async function obtenerCatalogosInstitucionales() {
     dependencias: any[];
     programas: any[];
     areas: any[];
-    grupos: any[];
+    departamentos: any[];
   }>("/reservas/catalogos-institucionales");
 }
 
@@ -73,9 +73,9 @@ export async function obtenerAreas() {
   return catalogos.areas;
 }
 
-export async function obtenerGrupos() {
+export async function obtenerDepartamentos() {
   const catalogos = await obtenerCatalogosInstitucionales();
-  return catalogos.grupos;
+  return catalogos.departamentos;
 }
 
 export async function crearSolicitud(datos: Record<string, unknown>) {

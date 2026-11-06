@@ -1,5 +1,8 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import * as XLSX from "xlsx";
+import jsPDF from "jspdf";
+import autoTable from "jspdf-autotable";
 import {
   Alert,
   Box,
@@ -20,6 +23,8 @@ import {
 import AdminLayout from '../../../../components/layout/AdminLayout';
 import type { DashboardData } from './interfaces/dashboard.interface';
 import { getDashboard } from './services/dashboard.service';
+import { listarSolicitudes } from "../Solicitudes/services/solicitudes.service";
+import ModalExportar from "./components/ModalExportar";
 
 const estadoStyles: Record<string, { bg: string; color: string }> = {
   Pendiente: { bg: '#FEF3C7', color: '#B45309' },
@@ -69,6 +74,212 @@ export default function Dashboard() {
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [modalExportar, setModalExportar] = useState(false);
+
+  const handleExportar = async (
+    tipo: "externas" | "internas" | "todas",
+    formato: "xlsx" | "pdf"
+  ) => {
+    try {
+      const filtros: Record<string, string> = {};
+      if (tipo === "externas") filtros.tipo = "externo";
+      if (tipo === "internas") filtros.tipo = "interno";
+
+      const lista = await listarSolicitudes(filtros);
+
+      const kpis = {
+        pendientes: data?.stats?.solicitudesPendientes ?? 0,
+        externas: data?.stats?.solicitudesExternas ?? 0,
+        internas: data?.stats?.solicitudesInternas ?? 0,
+        hoy: data?.stats?.reservasHoy ?? 0,
+      };
+
+      const fechaGeneracion = new Date().toLocaleString("es-CO", {
+        dateStyle: "long",
+        timeStyle: "short",
+      });
+
+      const tipoTexto =
+        tipo === "externas"
+          ? "Externas"
+          : tipo === "internas"
+            ? "Internas"
+            : "Todas";
+
+      // ========== EXCEL ==========
+      if (formato === "xlsx") {
+        const workbook = XLSX.utils.book_new();
+
+        const portada = [
+          ["SGME - MEDIOS EDUCATIVOS"],
+          ["Universidad CESMAG"],
+          [""],
+          ["REPORTE DE SOLICITUDES DE RESERVA"],
+          [""],
+          ["Tipo de reporte:", tipoTexto],
+          ["Fecha de generación:", fechaGeneracion],
+          [""],
+          ["RESUMEN ESTADÍSTICO"],
+          ["Solicitudes pendientes", kpis.pendientes],
+          ["Solicitudes externas", kpis.externas],
+          ["Solicitudes internas", kpis.internas],
+          ["Reservas confirmadas hoy", kpis.hoy],
+        ];
+
+        const hojaPortada = XLSX.utils.aoa_to_sheet(portada);
+        hojaPortada["!cols"] = [{ wch: 35 }, { wch: 25 }];
+        XLSX.utils.book_append_sheet(workbook, hojaPortada, "Resumen");
+
+        if (lista && lista.length > 0) {
+          const filas = lista.map((s: any, index: number) => ({
+            "N°": index + 1,
+            Código: s.codigo,
+            Solicitante: s.solicitante,
+            Tipo: s.tipo === "interno" ? "Institucional" : "Externa",
+            Espacio: s.espacio,
+            Campus: s.campus,
+            "Fecha de la reserva": s.fecha
+              ? String(s.fecha).split("T")[0].split("-").reverse().join("/")
+              : "",
+            "Hora inicio": s.hora_inicio ? String(s.hora_inicio).slice(0, 5) : "",
+            "Hora fin": s.hora_fin ? String(s.hora_fin).slice(0, 5) : "",
+            Horario:
+              s.hora_inicio && s.hora_fin
+                ? `${String(s.hora_inicio).slice(0, 5)} - ${String(s.hora_fin).slice(0, 5)}`
+                : "",
+            Estado: s.estado,
+          }));
+
+          const hojaDetalle = XLSX.utils.json_to_sheet(filas);
+          hojaDetalle["!cols"] = [
+            { wch: 5 },
+            { wch: 22 },
+            { wch: 25 },
+            { wch: 14 },
+            { wch: 25 },
+            { wch: 16 },
+            { wch: 16 },
+            { wch: 12 },
+            { wch: 12 },
+            { wch: 16 },
+            { wch: 12 },
+          ];
+          XLSX.utils.book_append_sheet(workbook, hojaDetalle, "Solicitudes");
+        }
+
+        XLSX.writeFile(
+          workbook,
+          `SGME_Solicitudes_${tipoTexto}_${new Date().toISOString().slice(0, 10)}.xlsx`
+        );
+      }
+
+      // ========== PDF ==========
+      if (formato === "pdf") {
+        const doc = new jsPDF();
+        const pageWidth = doc.internal.pageSize.getWidth();
+
+        doc.setFillColor(30, 58, 95);
+        doc.rect(0, 0, pageWidth, 28, "F");
+
+        doc.setTextColor(255, 255, 255);
+        doc.setFontSize(16);
+        doc.setFont("helvetica", "bold");
+        doc.text("SGME - MEDIOS EDUCATIVOS", 14, 12);
+
+        doc.setFontSize(10);
+        doc.setFont("helvetica", "normal");
+        doc.text("Universidad CESMAG", 14, 19);
+
+        doc.setFontSize(9);
+        doc.text("Reporte de Solicitudes de Reserva", pageWidth - 14, 12, {
+          align: "right",
+        });
+        doc.text(fechaGeneracion, pageWidth - 14, 19, { align: "right" });
+
+        doc.setTextColor(15, 23, 42);
+        doc.setFontSize(13);
+        doc.setFont("helvetica", "bold");
+        doc.text(`Tipo de solicitudes: ${tipoTexto}`, 14, 40);
+
+        doc.setFontSize(11);
+        doc.text("Resumen estadístico", 14, 52);
+
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(10);
+        doc.text(`• Solicitudes pendientes: ${kpis.pendientes}`, 18, 60);
+        doc.text(`• Solicitudes externas: ${kpis.externas}`, 18, 66);
+        doc.text(`• Solicitudes internas: ${kpis.internas}`, 18, 72);
+        doc.text(`• Reservas confirmadas hoy: ${kpis.hoy}`, 18, 78);
+
+        if (lista && lista.length > 0) {
+          const filas = lista.map((s: any) => [
+            s.codigo,
+            s.solicitante,
+            s.tipo === "interno" ? "Institucional" : "Externa",
+            s.espacio,
+            s.fecha
+              ? String(s.fecha).split("T")[0].split("-").reverse().join("/")
+              : "",
+            s.hora_inicio && s.hora_fin
+              ? `${String(s.hora_inicio).slice(0, 5)} - ${String(s.hora_fin).slice(0, 5)}`
+              : "",
+            s.estado,
+          ]);
+
+          autoTable(doc, {
+            startY: 88,
+            head: [
+              [
+                "Código",
+                "Solicitante",
+                "Tipo",
+                "Espacio",
+                "Fecha reserva",
+                "Horario",
+                "Estado",
+              ],
+            ],
+            body: filas,
+            styles: { fontSize: 7.5, cellPadding: 2.5 },
+            headStyles: {
+              fillColor: [30, 58, 95],
+              textColor: 255,
+              fontStyle: "bold",
+            },
+            alternateRowStyles: { fillColor: [248, 250, 252] },
+            margin: { left: 10, right: 10 },
+          });
+        } else {
+          doc.setFontSize(10);
+          doc.text(
+            "No se encontraron solicitudes con los filtros seleccionados.",
+            14,
+            90
+          );
+        }
+
+        const pageCount = doc.getNumberOfPages();
+        for (let i = 1; i <= pageCount; i++) {
+          doc.setPage(i);
+          doc.setFontSize(8);
+          doc.setTextColor(150);
+          doc.text(
+            `SGME - Medios Educativos | Página ${i} de ${pageCount}`,
+            pageWidth / 2,
+            doc.internal.pageSize.getHeight() - 10,
+            { align: "center" }
+          );
+        }
+
+        doc.save(
+          `SGME_Solicitudes_${tipoTexto}_${new Date().toISOString().slice(0, 10)}.pdf`
+        );
+      }
+    } catch (error) {
+      console.error(error);
+      alert("Error al exportar las solicitudes.");
+    }
+  };
 
   useEffect(() => {
     getDashboard()
@@ -92,7 +303,7 @@ export default function Dashboard() {
     <AdminLayout>
       <Box sx={{ width: '100%', minWidth: 0 }}>
         {/* ========== HEADER ========== */}
-        {/* ========== HEADER ========== */}
+
         <Box
           sx={{
             display: 'flex',
@@ -117,7 +328,7 @@ export default function Dashboard() {
               Dashboard
             </Typography>
             <Typography sx={{ color: '#64748B', fontSize: '0.9rem' }}>
-              Resumen de solicitudes internas y externas · Datos de ejemplo
+              Resumen de solicitudes internas y externas
             </Typography>
           </Box>
 
@@ -132,6 +343,7 @@ export default function Dashboard() {
           >
             <Button
               variant="contained"
+              onClick={() => setModalExportar(true)}
               sx={{
                 backgroundColor: '#EF4444',
                 textTransform: 'none',
@@ -511,6 +723,11 @@ export default function Dashboard() {
           </Button>
         </Box>
       </Box>
+      <ModalExportar
+        open={modalExportar}
+        onClose={() => setModalExportar(false)}
+        onExportar={handleExportar}
+      />
     </AdminLayout>
   );
 }

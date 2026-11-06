@@ -1,14 +1,20 @@
+
 import { Navigate, Outlet, Route, Routes } from 'react-router-dom';
 
 import Login from './pages/MediosEducativos/Public/Login/Login';
 import Dashboard from './pages/MediosEducativos/Admin/Dashboard/Dashboard';
 import AdminLayout from './components/layout/AdminLayout';
+
 import FormularioReserva from './pages/MediosEducativos/Public/Reserva/FormularioReserva';
 import ConsultaDisponibilidad from './pages/MediosEducativos/Public/Reserva/ConsultaDisponibilidad';
 import ConfirmacionReserva from './pages/MediosEducativos/Public/Reserva/Confirmacion';
 import ConsultaEstado from './pages/MediosEducativos/Public/Reserva/ConsultaEstado';
+
+import Solicitudes from './pages/MediosEducativos/Admin/Solicitudes/Solicitudes';
 import DetalleSolicitud from './pages/MediosEducativos/Admin/Solicitudes/SolicitudDetalle';
 import RechazarSolicitud from './pages/MediosEducativos/Admin/Solicitudes/RechazarSolicitud';
+import Agenda from './pages/MediosEducativos/Admin/Agenda/Agenda';
+
 import CeremoniasListado from './pages/MediosEducativos/Admin/Ceremonias/CeremoniasListado';
 import NuevaCeremonia from './pages/MediosEducativos/Admin/Ceremonias/NuevaCeremonia';
 import DetalleCeremonia from './pages/MediosEducativos/Admin/Ceremonias/DetalleCeremonia';
@@ -18,12 +24,11 @@ import GraduandoFormulario from './pages/MediosEducativos/Admin/Ceremonias/Gradu
 import GraduandoDetalle from './pages/MediosEducativos/Admin/Ceremonias/GraduandoDetalle';
 import Invitados from './pages/MediosEducativos/Admin/Ceremonias/Invitados';
 import ControlIngreso from './pages/MediosEducativos/Admin/Ceremonias/ControlIngreso';
+
 import GraduandoLogin from './pages/MediosEducativos/Graduando/GraduandoLogin';
 import GraduandoCallback from './pages/MediosEducativos/Graduando/GraduandoCallback';
 import GraduandoLayout from './pages/MediosEducativos/Graduando/GraduandoLayout';
 import { getSession as getGraduandoSession } from './services/graduandoAuth.service';
-
-
 
 import PublicLayout from './components/layout/PublicLayout';
 
@@ -71,14 +76,12 @@ function App() {
         <Route path="/reserva" element={<FormularioReserva />} />
         <Route path="/reserva/confirmacion" element={<ConfirmacionReserva />} />
         <Route path="/consulta-estado" element={<ConsultaEstado />} />
-
-
       </Route>
 
-      {/* Login (normalmente sin el layout público completo) */}
+      {/* Login administrativo */}
       <Route path="/login" element={<Login />} />
 
-      {/* Acceso separado de graduando. El callback no autentica por sí mismo. */}
+      {/* Acceso separado de graduando */}
       <Route path="/graduando/login" element={<GraduandoLogin />} />
       <Route path="/graduando/callback" element={<GraduandoCallback />} />
       <Route path="/graduando" element={<RequireGraduando />}>
@@ -87,11 +90,16 @@ function App() {
         </Route>
       </Route>
 
-      {/* Rutas administrativas */}
+      {/* Rutas administrativas protegidas */}
       <Route path="/admin" element={<RequireAdmin />}>
+        {/* Reservas */}
         <Route path="dashboard" element={<Dashboard />} />
+        <Route path="solicitudes" element={<Solicitudes />} />
         <Route path="solicitudes/:id" element={<DetalleSolicitud />} />
         <Route path="solicitudes/:id/rechazar" element={<RechazarSolicitud />} />
+        <Route path="agenda" element={<Agenda />} />
+
+        {/* Ceremonias */}
         <Route
           path="ceremonias"
           element={<Navigate to="/admin/eventos/ceremonias" replace />}

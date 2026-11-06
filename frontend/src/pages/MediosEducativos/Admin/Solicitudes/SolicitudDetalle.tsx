@@ -29,7 +29,7 @@ import {
   obtenerDependencias,
   obtenerProgramas,
   obtenerAreas,
-  obtenerGrupos,
+  obtenerDepartamentos,
 } from "../../Public/Reserva/services/reservas.service";
 
 const estadoStyles: Record<string, { bg: string; color: string }> = {
@@ -80,7 +80,7 @@ export default function DetalleSolicitud() {
   const [dependencias, setDependencias] = useState<any[]>([]);
   const [programas, setProgramas] = useState<any[]>([]);
   const [areas, setAreas] = useState<any[]>([]);
-  const [grupos, setGrupos] = useState<any[]>([]);
+  const [departamentos, setDepartamentos] = useState<any[]>([]);
 
   // Cargar solicitud
   useEffect(() => {
@@ -108,28 +108,72 @@ export default function DetalleSolicitud() {
       obtenerDependencias(),
       obtenerProgramas(),
       obtenerAreas(),
-      obtenerGrupos(),
-    ]).then(([c, t, d, p, a, g]) => {
-      setCampus(c.map((x: any) => ({ id: x.id_campus, nombre: x.nombre })));
-      setTiposEspacio(t.map((x: any) => ({ id: x.id_tipo_espacio, nombre: x.nombre })));
-      setDependencias(d.map((x: any) => ({ id: x.id_dependencia, nombre: x.nombre })));
-      setProgramas(p.map((x: any) => ({ id: x.id_programa, nombre: x.nombre })));
-      setAreas(a.map((x: any) => ({ id: x.id_area, nombre: x.nombre })));
-      setGrupos(g.map((x: any) => ({ id: x.id_grupo, nombre: x.nombre })));
-    });
-  }, [modoEdicion]);
+      obtenerDepartamentos(),
+    ]).then(([c, t, d, p, a, dep]) => {
+      const campusList = c.map((x: any) => ({ id: x.id_campus, nombre: x.nombre }));
+      const tiposList = t.map((x: any) => ({ id: x.id_tipo_espacio, nombre: x.nombre }));
+      const dependenciasList = d.map((x: any) => ({ id: x.id_dependencia, nombre: x.nombre }));
+      const programasList = p.map((x: any) => ({ id: x.id_programa, nombre: x.nombre }));
+      const areasList = a.map((x: any) => ({ id: x.id_area, nombre: x.nombre }));
+      const departamentosList = dep.map((x: any) => ({ id: x.id_departamento, nombre: x.nombre }));
 
-  // Cargar espacios según campus/tipo
+      setCampus(campusList);
+      setTiposEspacio(tiposList);
+      setDependencias(dependenciasList);
+      setProgramas(programasList);
+      setAreas(areasList);
+      setDepartamentos(departamentosList);
+
+      // Buscar IDs por nombre
+      const updates: any = {};
+
+      if (solicitud?.espacio) {
+        const campusEncontrado = campusList.find((x) => x.nombre === solicitud.espacio.campus);
+        const tipoEncontrado = tiposList.find((x) => x.nombre === solicitud.espacio.tipo);
+
+        if (campusEncontrado) updates.id_campus = String(campusEncontrado.id);
+        if (tipoEncontrado) updates.id_tipo_espacio = String(tipoEncontrado.id);
+      }
+
+      if (solicitud?.solicitante) {
+        const depEncontrada = dependenciasList.find((x) => x.nombre === solicitud.solicitante.dependencia);
+        const progEncontrado = programasList.find((x) => x.nombre === solicitud.solicitante.programa);
+        const areaEncontrada = areasList.find((x) => x.nombre === solicitud.solicitante.area);
+        const deptoEncontrado = departamentosList.find((x) => x.nombre === solicitud.solicitante.departamento);
+
+        if (depEncontrada) updates.id_dependencia = String(depEncontrada.id);
+        if (progEncontrado) updates.id_programa = String(progEncontrado.id);
+        if (areaEncontrada) updates.id_area = String(areaEncontrada.id);
+        if (deptoEncontrado) updates.id_departamento = String(deptoEncontrado.id);
+      }
+
+      if (Object.keys(updates).length > 0) {
+        setForm((prev: any) => ({ ...prev, ...updates }));
+      }
+    });
+  }, [modoEdicion, solicitud]);
+
+  // Cargar espacios cuando ya tenemos campus (y opcionalmente tipo)
   useEffect(() => {
-    if (!modoEdicion || !form.id_campus) return;
+    if (!modoEdicion || !form.id_campus) {
+      setEspacios([]);
+      return;
+    }
 
-    obtenerEspacios(form.id_campus, form.id_tipo_espacio).then((lista) => {
-      setEspacios(lista.map((x: any) => ({ id: x.id_espacio, nombre: x.nombre })));
-    });
+    obtenerEspacios(form.id_campus, form.id_tipo_espacio || undefined)
+      .then((lista) => {
+        setEspacios(lista.map((x: any) => ({ id: x.id_espacio, nombre: x.nombre })));
+      })
+      .catch(() => setEspacios([]));
   }, [modoEdicion, form.id_campus, form.id_tipo_espacio]);
 
   const entrarEdicion = () => {
     if (!solicitud) return;
+
+    // ← AGREGA ESTAS 3 LÍNEAS
+    console.log("solicitud completa:", solicitud);
+    console.log("espacio:", solicitud.espacio);
+    console.log("solicitante:", solicitud.solicitante);
 
     setForm({
       nombre_actividad: solicitud.nombre_actividad || "",
@@ -150,15 +194,16 @@ export default function DetalleSolicitud() {
       nombre_entidad: solicitud.solicitante?.nombre_entidad || "",
       tipo_entidad: solicitud.solicitante?.tipo_entidad || "",
       ciudad: solicitud.solicitante?.ciudad || "",
-      id_dependencia: solicitud.solicitante?.id_dependencia || "",
-      id_programa: solicitud.solicitante?.id_programa || "",
-      id_area: solicitud.solicitante?.id_area || "",
-      id_grupo: solicitud.solicitante?.id_grupo || "",
+      id_dependencia: solicitud.solicitante?.id_dependencia ?? "",
+      id_programa: solicitud.solicitante?.id_programa ?? "",
+      id_area: solicitud.solicitante?.id_area ?? "",
+      id_departamento: solicitud.solicitante?.id_departamento ?? "",
 
-      // Espacio
-      id_campus: "", // se llenará después
+      // Espacio 
+
+      id_campus: "",
       id_tipo_espacio: "",
-      id_espacio: solicitud.espacio?.id || "",
+      id_espacio: solicitud.espacio?.id != null ? String(solicitud.espacio.id) : "",
     });
 
     setModoEdicion(true);
@@ -189,7 +234,7 @@ export default function DetalleSolicitud() {
         id_dependencia: form.id_dependencia ? Number(form.id_dependencia) : null,
         id_programa: form.id_programa ? Number(form.id_programa) : null,
         id_area: form.id_area ? Number(form.id_area) : null,
-        id_grupo: form.id_grupo ? Number(form.id_grupo) : null,
+        id_departamento: form.id_departamento ? Number(form.id_departamento) : null,
         ocurrencias: solicitud.ocurrencias || [],
       });
 
@@ -437,21 +482,65 @@ export default function DetalleSolicitud() {
                 <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", sm: "1fr 1fr" }, gap: 2 }}>
                   {esInterno ? (
                     <>
-                      <TextField select label="Dependencia" size="small" fullWidth value={form.id_dependencia} onChange={handleChange("id_dependencia")}>
+                      <TextField
+                        select
+                        label="Dependencia"
+                        size="small"
+                        fullWidth
+                        value={form.id_dependencia != null ? String(form.id_dependencia) : ""}
+                        onChange={handleChange("id_dependencia")}
+                      >
                         <MenuItem value="">—</MenuItem>
-                        {dependencias.map((x) => <MenuItem key={x.id} value={x.id}>{x.nombre}</MenuItem>)}
+                        {dependencias.map((x) => (
+                          <MenuItem key={x.id} value={String(x.id)}>
+                            {x.nombre}
+                          </MenuItem>
+                        ))}
                       </TextField>
-                      <TextField select label="Programa" size="small" fullWidth value={form.id_programa} onChange={handleChange("id_programa")}>
+                      <TextField
+                        select
+                        label="Programa"
+                        size="small"
+                        fullWidth
+                        value={form.id_programa != null ? String(form.id_programa) : ""}
+                        onChange={handleChange("id_programa")}
+                      >
                         <MenuItem value="">—</MenuItem>
-                        {programas.map((x) => <MenuItem key={x.id} value={x.id}>{x.nombre}</MenuItem>)}
+                        {programas.map((x) => (
+                          <MenuItem key={x.id} value={String(x.id)}>
+                            {x.nombre}
+                          </MenuItem>
+                        ))}
                       </TextField>
-                      <TextField select label="Área" size="small" fullWidth value={form.id_area} onChange={handleChange("id_area")}>
+                      <TextField
+                        select
+                        label="Área"
+                        size="small"
+                        fullWidth
+                        value={form.id_area != null ? String(form.id_area) : ""}
+                        onChange={handleChange("id_area")}
+                      >
                         <MenuItem value="">—</MenuItem>
-                        {areas.map((x) => <MenuItem key={x.id} value={x.id}>{x.nombre}</MenuItem>)}
+                        {areas.map((x) => (
+                          <MenuItem key={x.id} value={String(x.id)}>
+                            {x.nombre}
+                          </MenuItem>
+                        ))}
                       </TextField>
-                      <TextField select label="Grupo" size="small" fullWidth value={form.id_grupo} onChange={handleChange("id_grupo")}>
+                      <TextField
+                        select
+                        label="Departamento"
+                        size="small"
+                        fullWidth
+                        value={form.id_departamento != null ? String(form.id_departamento) : ""}
+                        onChange={handleChange("id_departamento")}
+                      >
                         <MenuItem value="">—</MenuItem>
-                        {grupos.map((x) => <MenuItem key={x.id} value={x.id}>{x.nombre}</MenuItem>)}
+                        {departamentos.map((x) => (
+                          <MenuItem key={x.id} value={String(x.id)}>
+                            {x.nombre}
+                          </MenuItem>
+                        ))}
                       </TextField>
                     </>
                   ) : (
@@ -475,7 +564,10 @@ export default function DetalleSolicitud() {
                       <Dato label="Dependencia" valor={solicitud.solicitante?.dependencia} />
                       <Dato label="Programa" valor={solicitud.solicitante?.programa} />
                       <Dato label="Área" valor={solicitud.solicitante?.area} />
-                      <Dato label="Grupo" valor={solicitud.solicitante?.grupo} />
+                      <Dato
+                        label="Departamento"
+                        valor={solicitud.solicitante?.departamento}
+                      /><Dato label="Grupo" valor={solicitud.solicitante?.grupo} />
                     </>
                   ) : (
                     <>
@@ -494,17 +586,52 @@ export default function DetalleSolicitud() {
 
               {modoEdicion ? (
                 <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", sm: "1fr 1fr" }, gap: 2 }}>
-                  <TextField select label="Campus" size="small" fullWidth value={form.id_campus} onChange={handleChange("id_campus")}>
+                  <TextField
+                    select
+                    label="Campus"
+                    size="small"
+                    fullWidth
+                    value={form.id_campus != null ? String(form.id_campus) : ""}
+                    onChange={handleChange("id_campus")}
+                  >
                     <MenuItem value="">Seleccione</MenuItem>
-                    {campus.map((x) => <MenuItem key={x.id} value={x.id}>{x.nombre}</MenuItem>)}
+                    {campus.map((x) => (
+                      <MenuItem key={x.id} value={String(x.id)}>
+                        {x.nombre}
+                      </MenuItem>
+                    ))}
                   </TextField>
-                  <TextField select label="Tipo de espacio" size="small" fullWidth value={form.id_tipo_espacio} onChange={handleChange("id_tipo_espacio")}>
+
+                  <TextField
+                    select
+                    label="Tipo de espacio"
+                    size="small"
+                    fullWidth
+                    value={form.id_tipo_espacio != null ? String(form.id_tipo_espacio) : ""}
+                    onChange={handleChange("id_tipo_espacio")}
+                  >
                     <MenuItem value="">Seleccione</MenuItem>
-                    {tiposEspacio.map((x) => <MenuItem key={x.id} value={x.id}>{x.nombre}</MenuItem>)}
+                    {tiposEspacio.map((x) => (
+                      <MenuItem key={x.id} value={String(x.id)}>
+                        {x.nombre}
+                      </MenuItem>
+                    ))}
                   </TextField>
-                  <TextField select label="Espacio *" size="small" fullWidth value={form.id_espacio} onChange={handleChange("id_espacio")}>
+
+                  <TextField
+                    select
+                    label="Espacio *"
+                    size="small"
+                    fullWidth
+                    value={form.id_espacio != null ? String(form.id_espacio) : ""}
+                    onChange={handleChange("id_espacio")}
+                  >
                     <MenuItem value="">Seleccione</MenuItem>
-                    {espacios.map((x) => <MenuItem key={x.id} value={x.id}>{x.nombre}</MenuItem>)}
+                    {espacios.map((x) => (
+                      <MenuItem key={x.id} value={String(x.id)}>
+                        {x.nombre}
+                      </MenuItem>
+                    ))}
                   </TextField>
                 </Box>
               ) : (

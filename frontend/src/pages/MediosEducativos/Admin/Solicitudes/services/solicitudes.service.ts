@@ -18,13 +18,24 @@ async function solicitar<T>(ruta: string, opciones?: RequestInit): Promise<T> {
   return datos;
 }
 
+export async function listarSolicitudes(filtros: Record<string, string> = {}) {
+  const params = new URLSearchParams();
+
+  Object.entries(filtros).forEach(([key, value]) => {
+    if (value) params.set(key, value);
+  });
+
+  const query = params.toString();
+  return solicitar<any[]>(`/reservas/${query ? `?${query}` : ""}`);
+}
+
 export async function obtenerSolicitudPorId(id: number | string) {
   return solicitar<any>(`/reservas/${id}`);
 }
 
 export async function actualizarEstadoSolicitud(
   id: number | string,
-  estado: "Aprobada" | "Rechazada",
+  estado: "Aprobada" | "Rechazada" | "Cancelada",
   motivo?: string
 ) {
   return solicitar<any>(`/reservas/${id}/estado`, {
@@ -42,3 +53,11 @@ export async function actualizarSolicitud(
     body: JSON.stringify(datos),
   });
 }
+export async function obtenerSolicitudesParaExportar(tipo: "externas" | "internas" | "todas") {
+  const filtros: Record<string, string> = {};
+
+  if (tipo === "externas") filtros.tipo = "externo";
+  if (tipo === "internas") filtros.tipo = "interno";
+
+  return listarSolicitudes(filtros);
+} 

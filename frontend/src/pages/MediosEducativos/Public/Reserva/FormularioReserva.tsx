@@ -24,7 +24,7 @@ import {
   obtenerCampus,
   obtenerDependencias,
   obtenerEspacios,
-  obtenerGrupos,
+  obtenerDepartamentos,
   obtenerProgramas,
   obtenerTiposEspacio,
   crearSolicitud,
@@ -68,7 +68,7 @@ type Formulario = {
   id_dependencia: string;
   id_programa: string;
   id_area: string;
-  id_grupo: string;
+  id_departamento: string;
   id_campus: string;
   id_tipo_espacio: string;
   id_espacio: string;
@@ -93,7 +93,7 @@ const FORM_INICIAL: Formulario = {
   id_dependencia: "",
   id_programa: "",
   id_area: "",
-  id_grupo: "",
+  id_departamento: "",
   id_campus: "",
   id_tipo_espacio: "",
   id_espacio: "",
@@ -117,7 +117,7 @@ const perfilCampos: (keyof Formulario)[] = [
   "id_dependencia",
   "id_programa",
   "id_area",
-  "id_grupo",
+  "id_departamento",
 ];
 
 function fechaLocal(fecha: Date): string {
@@ -210,8 +210,7 @@ export default function FormularioReserva() {
   const [espacios, setEspacios] = useState<Opcion[]>([]);
   const [programas, setProgramas] = useState<Opcion[]>([]);
   const [dependencias, setDependencias] = useState<Opcion[]>([]);
-  const [areas, setAreas] = useState<Opcion[]>([]);
-  const [grupos, setGrupos] = useState<Opcion[]>([]);
+  const [areas, setAreas] = useState<Opcion[]>([]); const [departamentos, setDepartamentos] = useState<Opcion[]>([]); const [grupos, setGrupos] = useState<Opcion[]>([]);
 
   const [form, setForm] = useState<Formulario>(FORM_INICIAL);
   const [medios, setMedios] = useState<Record<string, boolean>>({});
@@ -292,9 +291,9 @@ export default function FormularioReserva() {
       obtenerProgramas(),
       obtenerDependencias(),
       obtenerAreas(),
-      obtenerGrupos(),
+      obtenerDepartamentos(),
     ])
-      .then(([c, t, p, d, a, g]) => {
+      .then(([c, t, p, d, a, dep]) => {
         if (!activo) return;
 
         setCampus(c.map((x: any) => ({ id: Number(x.id_campus), nombre: x.nombre })));
@@ -302,7 +301,10 @@ export default function FormularioReserva() {
         setProgramas(p.map((x: any) => ({ id: Number(x.id_programa), nombre: x.nombre })));
         setDependencias(d.map((x: any) => ({ id: Number(x.id_dependencia), nombre: x.nombre })));
         setAreas(a.map((x: any) => ({ id: Number(x.id_area), nombre: x.nombre })));
-        setGrupos(g.map((x: any) => ({ id: Number(x.id_grupo), nombre: x.nombre })));
+        setDepartamentos(dep.map((x: any) => ({
+          id: Number(x.id_departamento),
+          nombre: x.nombre
+        })));
       })
       .catch((err: unknown) => {
         if (activo) {
@@ -354,19 +356,19 @@ export default function FormularioReserva() {
 
   const handleChange =
     (campo: keyof Formulario) =>
-    (e: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
-      const valor = e.target.value;
+      (e: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+        const valor = e.target.value;
 
-      setForm((prev) => {
-        const actualizado = { ...prev, [campo]: valor };
+        setForm((prev) => {
+          const actualizado = { ...prev, [campo]: valor };
 
-        if (campo === "id_campus" || campo === "id_tipo_espacio") {
-          actualizado.id_espacio = "";
-        }
+          if (campo === "id_campus" || campo === "id_tipo_espacio") {
+            actualizado.id_espacio = "";
+          }
 
-        return actualizado;
-      });
-    };
+          return actualizado;
+        });
+      };
 
   const cambiarDia = (dia: number, seleccionado: boolean) => {
     setDiasSeleccionados((prev) =>
@@ -380,12 +382,12 @@ export default function FormularioReserva() {
     () =>
       esRecurrente
         ? obtenerOcurrencias(
-            form.fecha_inicio,
-            form.fecha_fin,
-            diasSeleccionados,
-            form.hora_inicio,
-            form.hora_fin
-          )
+          form.fecha_inicio,
+          form.fecha_fin,
+          diasSeleccionados,
+          form.hora_inicio,
+          form.hora_fin
+        )
         : [],
     [
       esRecurrente,
@@ -404,9 +406,9 @@ export default function FormularioReserva() {
 
   const periodoExcedeSemestre = Boolean(
     form.fecha_inicio &&
-      form.fecha_fin &&
-      limiteSemestre &&
-      fechaValida(form.fecha_fin) > limiteSemestre
+    form.fecha_fin &&
+    limiteSemestre &&
+    fechaValida(form.fecha_fin) > limiteSemestre
   );
 
   const guardarPerfilPersonal = () => {
@@ -471,8 +473,27 @@ export default function FormularioReserva() {
       setError("Completa la entidad, el tipo de entidad y la ciudad.");
       return;
     }
+    // Validar que una recurrencia tenga un rango de fechas
+    if (
+      esInterno &&
+      esRecurrente &&
+      form.fecha_inicio === form.fecha_fin
+    ) {
+      setError(
+        "No se puede generar la recurrencia. Para realizar una reserva recurrente debes seleccionar una fecha inicial y una fecha final diferentes."
+      );
+      return;
+    }
 
-    if (esRecurrente && esInterno) {
+    const esRangoFechas =
+      Boolean(form.fecha_inicio && form.fecha_fin) &&
+      form.fecha_inicio !== form.fecha_fin;
+
+    const esRecurrencia =
+      esInterno && (esRecurrente || esRangoFechas);
+
+    if (esRecurrencia) {
+
       if (!form.fecha_inicio || !form.fecha_fin) {
         setError("Selecciona las fechas inicial y final de la recurrencia.");
         return;
@@ -519,7 +540,7 @@ export default function FormularioReserva() {
         id_programa: esInterno && form.id_programa ? Number(form.id_programa) : null,
         id_dependencia: esInterno && form.id_dependencia ? Number(form.id_dependencia) : null,
         id_area: esInterno && form.id_area ? Number(form.id_area) : null,
-        id_grupo: esInterno && form.id_grupo ? Number(form.id_grupo) : null,
+        id_departamento: esInterno && form.id_departamento ? Number(form.id_departamento) : null,
         id_espacio: Number(form.id_espacio),
         fecha_inicio: form.fecha_inicio,
         fecha_fin: form.fecha_fin,
@@ -529,10 +550,10 @@ export default function FormularioReserva() {
         medios_requeridos: mediosSeleccionados.join(", ") || null,
         observaciones: form.observaciones.trim() || null,
 
-        es_recurrente: esInterno && esRecurrente,
-        frecuencia_recurrencia: esInterno && esRecurrente ? "semanal" : null,
-        dias_semana: esInterno && esRecurrente ? diasSeleccionados : null,
-        ocurrencias: esInterno && esRecurrente ? ocurrencias : [],
+        es_recurrente: esRecurrencia,
+        frecuencia_recurrencia: esRecurrencia ? "semanal" : null,
+        dias_semana: esRecurrencia ? diasSeleccionados : null,
+        ocurrencias: esRecurrencia ? ocurrencias : [],
       });
 
       try {
@@ -1132,13 +1153,13 @@ export default function FormularioReserva() {
                 <TextField
                   select
                   size="small"
-                  label="Grupo"
-                  value={form.id_grupo}
-                  onChange={handleChange("id_grupo")}
+                  label="Departamento"
+                  value={form.id_departamento}
+                  onChange={handleChange("id_departamento")}
                   sx={campoSx}
                 >
                   <MenuItem value="">Seleccione una opción</MenuItem>
-                  {grupos.map((x) => (
+                  {departamentos.map((x) => (
                     <MenuItem key={x.id} value={x.id}>
                       {x.nombre}
                     </MenuItem>
