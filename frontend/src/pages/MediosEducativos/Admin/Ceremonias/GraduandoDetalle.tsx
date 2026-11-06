@@ -17,9 +17,20 @@ import {
   getGraduandoById, getInvitados, updateInvitado, addInvitado,
   getProgramasCatalogo, getSesiones, updateGraduando,
 } from './services/ceremonias.service';
+import { getCurrentGraduando } from '../../../../services/graduandoAuth.service';
+import {
+  addMiInvitado, getMisInvitados, updateMiInvitado,
+} from '../../../../services/graduandoInvitados.service';
 
-export default function GraduandoDetalle() {
-  const { id, graduandoId } = useParams<{ id: string; graduandoId: string }>();
+interface GraduandoDetalleProps {
+  modoGraduando?: boolean;
+}
+
+export default function GraduandoDetalle({ modoGraduando = false }: GraduandoDetalleProps) {
+  const routeParams = useParams<{ id: string; graduandoId: string }>();
+  const currentGraduando = modoGraduando ? getCurrentGraduando() : null;
+  const id = routeParams.id ?? currentGraduando?.ceremoniaId;
+  const graduandoId = routeParams.graduandoId ?? currentGraduando?.id;
   const navigate = useNavigate();
   const [graduando, setGraduando] = useState<Graduando | null>(null);
   const [invitados, setInvitados] = useState<Invitado[]>([]);
@@ -52,19 +63,34 @@ export default function GraduandoDetalle() {
   const [invEstado, setInvEstado] = useState('Autorizado');
 
   const load = useCallback(async () => {
-    if (!graduandoId || !id) return;
+    if (!modoGraduando && (!graduandoId || !id)) return;
     setLoading(true);
     try {
-      const [g, invs, programasDisponibles, sesionesDisponibles] = await Promise.all([
-        getGraduandoById(graduandoId),
-        getInvitados(id, graduandoId),
-        getProgramasCatalogo(),
-        getSesiones(id),
-      ]);
+      let g: Graduando | null;
+
+      if (modoGraduando) {
+        const perfil = getCurrentGraduando();
+        if (!perfil) throw new Error('La sesión de graduando no está disponible.');
+        g = perfil;
+        setInvitados(await getMisInvitados());
+        setProgramas([]);
+        setSesiones([]);
+      } else if (id && graduandoId) {
+        const [graduandoActual, invitadosActuales, programasDisponibles, sesionesDisponibles] = await Promise.all([
+          getGraduandoById(graduandoId),
+          getInvitados(id, graduandoId),
+          getProgramasCatalogo(),
+          getSesiones(id),
+        ]);
+        g = graduandoActual;
+        setInvitados(invitadosActuales);
+        setProgramas(programasDisponibles.filter((programa) => programa.estado));
+        setSesiones(sesionesDisponibles);
+      } else {
+        return;
+      }
+
       setGraduando(g);
-      setInvitados(invs);
-      setProgramas(programasDisponibles.filter((programa) => programa.estado));
-      setSesiones(sesionesDisponibles);
       setLoadError('');
       if (g) {
         setFormNombres(g.nombres);
@@ -84,7 +110,7 @@ export default function GraduandoDetalle() {
     } finally {
       setLoading(false);
     }
-  }, [id, graduandoId]);
+  }, [id, modoGraduando, graduandoId]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -148,7 +174,16 @@ export default function GraduandoDetalle() {
     setInvError('');
     try {
       let invitadoGuardado: Invitado | null = null;
-      if (selectedInv) {
+      if (modoGraduando) {
+        const input = {
+          nombre: invNombre,
+          documento: invDoc,
+          autorizacion: invEstado as 'Autorizado' | 'Pendiente',
+        };
+        invitadoGuardado = selectedInv
+          ? await updateMiInvitado(selectedInv.id, input)
+          : await addMiInvitado(input);
+      } else if (selectedInv) {
         invitadoGuardado = await updateInvitado(selectedInv.id, {
           nombre: invNombre,
           documento: invDoc,
@@ -198,12 +233,32 @@ export default function GraduandoDetalle() {
           Graduando + invitados — Detalle
         </Typography>
         <Typography sx={{ color: '#5A6A7A', fontSize: '0.875rem' }}>
-          Eventos institucionales / Ceremonias de grado / Graduandos / Detalle
+          {modoGraduando
+            ? 'Consulta tu ficha y gestiona tus invitados.'
+            : 'Eventos institucionales / Ceremonias de grado / Graduandos / Detalle'}
         </Typography>
       </Box>
       {loadError && <Alert severity="error" sx={{ mb: 2 }}>{loadError}</Alert>}
+      {modoGraduando && (
+        <Alert severity="info" sx={{ mb: 2 }}>
+          ACCESO DE PRUEBA. La ficha y los invitados proceden de los registros importados; los cambios se guardan en la base de datos. RUAH aún no está integrado.
+        </Alert>
+      )}
 
       {/* Breadcrumb bar */}
+      {modoGraduando ? (
+        <Box sx={{
+          backgroundColor: '#FFFFFF', borderRadius: '10px', border: '1px solid #E5EAF0',
+          borderLeft: '4px solid #E30613', px: 2.5, py: 1.5, mb: 2.5,
+        }}>
+          <Typography sx={{ fontWeight: 700, fontSize: '0.95rem', color: '#0B1A2A' }}>
+            Ceremonia de grados
+          </Typography>
+          <Typography sx={{ color: '#5A6A7A', fontSize: '0.8rem' }}>
+            {graduando?.sesionLabel || 'Sesión asociada'}
+          </Typography>
+        </Box>
+      ) : (
       <Box sx={{
         backgroundColor: '#FFFFFF', borderRadius: '10px', border: '1px solid #E5EAF0',
         borderLeft: '4px solid #E30613', px: 2.5, py: 1.5, mb: 2.5,
@@ -249,6 +304,7 @@ export default function GraduandoDetalle() {
           </Typography>
         </Box>
       </Box>
+      )}
 
       {/* Info graduando */}
       <Card elevation={0} sx={{ borderRadius: '12px', border: '1px solid #E5EAF0', mb: 2.5 }}>
@@ -258,10 +314,12 @@ export default function GraduandoDetalle() {
               <Typography sx={{ fontWeight: 700, fontSize: '1rem', color: '#0B1A2A' }}>Información del graduando</Typography>
               <Box sx={{ width: 40, height: 3, backgroundColor: '#E30613', mt: 0.5 }} />
             </Box>
-            <Button variant="text" onClick={() => setEditGradOpen(true)}
-              sx={{ color: '#1565C0', textTransform: 'none', fontWeight: 500, fontSize: '0.875rem' }}>
-              Editar →
-            </Button>
+            {!modoGraduando && (
+              <Button variant="text" onClick={() => setEditGradOpen(true)}
+                sx={{ color: '#1565C0', textTransform: 'none', fontWeight: 500, fontSize: '0.875rem' }}>
+                Editar →
+              </Button>
+            )}
           </Box>
           <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr' }, gap: 1.5 }}>
             {[
@@ -356,17 +414,21 @@ export default function GraduandoDetalle() {
           Los invitados son registrados por el graduando y quedan asociados a su registro.
         </Typography>
         <Typography sx={{ color: '#5A6A7A', fontSize: '0.85rem' }}>
-          El ingreso se registra posteriormente desde Control de ingreso por sesión.
+          {modoGraduando
+            ? 'Tus invitados quedan asociados a tu registro.'
+            : 'El ingreso se registra posteriormente desde Control de ingreso por sesión.'}
         </Typography>
       </Box>
 
-      <Button variant="outlined" onClick={() => navigate(`/admin/eventos/ceremonias/${id}/graduandos`)}
-        sx={{ textTransform: 'none', borderRadius: '8px', borderColor: '#C5CDD8', color: '#1A2A3A' }}>
-        Volver a graduandos
-      </Button>
+      {!modoGraduando && (
+        <Button variant="outlined" onClick={() => navigate(`/admin/eventos/ceremonias/${id}/graduandos`)}
+          sx={{ textTransform: 'none', borderRadius: '8px', borderColor: '#C5CDD8', color: '#1A2A3A' }}>
+          Volver a graduandos
+        </Button>
+      )}
 
       {/* Modal Editar graduando */}
-      <Dialog open={editGradOpen} onClose={() => setEditGradOpen(false)} maxWidth="md" fullWidth
+      <Dialog open={editGradOpen && !modoGraduando} onClose={() => setEditGradOpen(false)} maxWidth="md" fullWidth
         slotProps={{ paper: { sx: { borderRadius: '12px' } } }}>
         <DialogTitle sx={{ fontWeight: 700 }}>
           Editar graduando

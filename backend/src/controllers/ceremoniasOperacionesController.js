@@ -1090,25 +1090,15 @@ async function validarCupoInvitados(client, ceremoniaId, graduandoId, cantidadNu
     `SELECT
        (SELECT COUNT(*)::integer
         FROM public.invitado
-        WHERE id_graduando = $2) AS "invitadosGraduando",
-       (SELECT COUNT(*)::integer
-        FROM public.invitado i
-        INNER JOIN public.graduando g ON g.id_graduando = i.id_graduando
-        WHERE g.id_ceremonia = $1) AS "invitadosCeremonia"`,
-    [ceremoniaId, graduandoId],
+        WHERE id_graduando = $1) AS "invitadosGraduando"`,
+    [graduandoId],
   );
-  const { invitadosGraduando, invitadosCeremonia } = conteos.rows[0];
+  const { invitadosGraduando } = conteos.rows[0];
   if (invitadosGraduando + cantidadNueva > ceremonia.maxInvitadosPorGraduando) {
     throw errorHttp(
       409,
       `Este graduando ya alcanzó el límite de ${ceremonia.maxInvitadosPorGraduando} invitados.`,
     );
-  }
-  if (
-    ceremonia.cupoInvitados !== null
-    && invitadosCeremonia + cantidadNueva > ceremonia.cupoInvitados
-  ) {
-    throw errorHttp(409, 'Se alcanzó el cupo total de invitados de la ceremonia.');
   }
 }
 

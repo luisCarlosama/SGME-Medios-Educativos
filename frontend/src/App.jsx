@@ -18,6 +18,10 @@ import GraduandoFormulario from './pages/MediosEducativos/Admin/Ceremonias/Gradu
 import GraduandoDetalle from './pages/MediosEducativos/Admin/Ceremonias/GraduandoDetalle';
 import Invitados from './pages/MediosEducativos/Admin/Ceremonias/Invitados';
 import ControlIngreso from './pages/MediosEducativos/Admin/Ceremonias/ControlIngreso';
+import GraduandoLogin from './pages/MediosEducativos/Graduando/GraduandoLogin';
+import GraduandoCallback from './pages/MediosEducativos/Graduando/GraduandoCallback';
+import GraduandoLayout from './pages/MediosEducativos/Graduando/GraduandoLayout';
+import { getSession as getGraduandoSession } from './services/graduandoAuth.service';
 
 
 
@@ -29,6 +33,30 @@ function CeremoniasAdminLayout() {
       <Outlet />
     </AdminLayout>
   );
+}
+
+function RequireGraduando() {
+  return getGraduandoSession()
+    ? <Outlet />
+    : <Navigate to="/graduando/login" replace />;
+}
+
+function hasAdminSession() {
+  try {
+    return Boolean(localStorage.getItem('me_admin_user'));
+  } catch {
+    return false;
+  }
+}
+
+function RequireAdmin() {
+  if (getGraduandoSession()) {
+    return <Navigate to="/graduando/mis-invitados" replace />;
+  }
+
+  return hasAdminSession()
+    ? <Outlet />
+    : <Navigate to="/login" replace />;
 }
 
 function App() {
@@ -50,24 +78,35 @@ function App() {
       {/* Login (normalmente sin el layout público completo) */}
       <Route path="/login" element={<Login />} />
 
+      {/* Acceso separado de graduando. El callback no autentica por sí mismo. */}
+      <Route path="/graduando/login" element={<GraduandoLogin />} />
+      <Route path="/graduando/callback" element={<GraduandoCallback />} />
+      <Route path="/graduando" element={<RequireGraduando />}>
+        <Route element={<GraduandoLayout />}>
+          <Route path="mis-invitados" element={<GraduandoDetalle modoGraduando />} />
+        </Route>
+      </Route>
+
       {/* Rutas administrativas */}
-      <Route path="/admin/dashboard" element={<Dashboard />} />
-      <Route path="/admin/solicitudes/:id" element={<DetalleSolicitud />} />
-      <Route path="/admin/solicitudes/:id/rechazar" element={<RechazarSolicitud />} />
-      <Route
-        path="/admin/ceremonias"
-        element={<Navigate to="/admin/eventos/ceremonias" replace />}
-      />
-      <Route path="/admin/eventos/ceremonias" element={<CeremoniasAdminLayout />}>
-        <Route index element={<CeremoniasListado />} />
-        <Route path="nueva" element={<NuevaCeremonia />} />
-        <Route path=":id" element={<DetalleCeremonia />} />
-        <Route path=":id/sesion/:sesionId" element={<ConfigurarSesion />} />
-        <Route path=":id/graduandos" element={<Graduandos />} />
-        <Route path=":id/graduandos/nuevo" element={<GraduandoFormulario />} />
-        <Route path=":id/graduandos/:graduandoId" element={<GraduandoDetalle />} />
-        <Route path=":id/invitados" element={<Invitados />} />
-        <Route path=":id/control" element={<ControlIngreso />} />
+      <Route path="/admin" element={<RequireAdmin />}>
+        <Route path="dashboard" element={<Dashboard />} />
+        <Route path="solicitudes/:id" element={<DetalleSolicitud />} />
+        <Route path="solicitudes/:id/rechazar" element={<RechazarSolicitud />} />
+        <Route
+          path="ceremonias"
+          element={<Navigate to="/admin/eventos/ceremonias" replace />}
+        />
+        <Route path="eventos/ceremonias" element={<CeremoniasAdminLayout />}>
+          <Route index element={<CeremoniasListado />} />
+          <Route path="nueva" element={<NuevaCeremonia />} />
+          <Route path=":id" element={<DetalleCeremonia />} />
+          <Route path=":id/sesion/:sesionId" element={<ConfigurarSesion />} />
+          <Route path=":id/graduandos" element={<Graduandos />} />
+          <Route path=":id/graduandos/nuevo" element={<GraduandoFormulario />} />
+          <Route path=":id/graduandos/:graduandoId" element={<GraduandoDetalle />} />
+          <Route path=":id/invitados" element={<Invitados />} />
+          <Route path=":id/control" element={<ControlIngreso />} />
+        </Route>
       </Route>
 
       {/* Ruta no encontrada */}
