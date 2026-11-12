@@ -134,9 +134,7 @@ export default function NuevaCeremonia() {
         <Typography variant="h4" sx={{ fontWeight: 700, color: '#0B1A2A', fontSize: '1.75rem', mb: 0.5 }}>
           Nueva ceremonia
         </Typography>
-        <Typography sx={{ color: '#5A6A7A', fontSize: '0.875rem', mb: 0.5 }}>
-          Eventos institucionales / Ceremonias de grado / Nueva ceremonia
-        </Typography>
+        
         <Typography sx={{ color: '#5A6A7A', fontSize: '0.9rem' }}>
           Registra la información general de la ceremonia para continuar con su configuración.
         </Typography>

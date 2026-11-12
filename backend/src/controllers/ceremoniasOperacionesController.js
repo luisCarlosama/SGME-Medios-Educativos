@@ -1377,6 +1377,8 @@ export async function buscarGraduandosControlIngreso(req, res) {
   }
 }
 
+
+
 export async function buscarInvitadosControlIngreso(req, res) {
   const sesionId = await validarSesionControl(req, res);
   if (!sesionId) return;

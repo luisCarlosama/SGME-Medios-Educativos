@@ -30,6 +30,9 @@ import GraduandoCallback from './pages/MediosEducativos/Graduando/GraduandoCallb
 import GraduandoLayout from './pages/MediosEducativos/Graduando/GraduandoLayout';
 import { getSession as getGraduandoSession } from './services/graduandoAuth.service';
 
+import Historial from "./pages/MediosEducativos/Admin/Historial/Historial";
+import DetalleHistorial from "./pages/MediosEducativos/Admin/Historial/DetalleHistorial";
+
 import PublicLayout from './components/layout/PublicLayout';
 
 function CeremoniasAdminLayout() {
@@ -90,6 +93,7 @@ function App() {
         </Route>
       </Route>
 
+
       {/* Rutas administrativas protegidas */}
       <Route path="/admin" element={<RequireAdmin />}>
         {/* Reservas */}
@@ -99,6 +103,10 @@ function App() {
         <Route path="solicitudes/:id/rechazar" element={<RechazarSolicitud />} />
         <Route path="agenda" element={<Agenda />} />
 
+        {/* Historial */}
+        <Route path="historial" element={<Historial />} />
+        <Route path="historial/reserva/:id" element={<DetalleHistorial />} />
+        <Route path="historial/ceremonia/:id" element={<DetalleHistorial />} />
         {/* Ceremonias */}
         <Route
           path="ceremonias"
@@ -116,6 +124,7 @@ function App() {
           <Route path=":id/control" element={<ControlIngreso />} />
         </Route>
       </Route>
+
 
       {/* Ruta no encontrada */}
       <Route path="*" element={<Navigate to="/disponibilidad" replace />} />

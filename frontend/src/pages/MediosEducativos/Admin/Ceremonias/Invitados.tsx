@@ -79,9 +79,7 @@ export default function Invitados() {
         <Typography variant="h4" sx={{ fontWeight: 700, color: '#0B1A2A', fontSize: '1.75rem', mb: 0.5 }}>
           Listado de Invitados — Gestión
         </Typography>
-        <Typography sx={{ color: '#5A6A7A', fontSize: '0.875rem' }}>
-          Eventos institucionales / Ceremonias de grado / Invitados
-        </Typography>
+        
       </Box>
 
       <Typography sx={{ fontWeight: 700, fontSize: '1.1rem', color: '#0B1A2A', mb: 2 }}>

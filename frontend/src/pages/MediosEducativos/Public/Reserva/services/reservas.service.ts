@@ -132,3 +132,25 @@ export async function obtenerAgendaDia(
 export async function consultarSolicitudPorCodigo(codigo: string) {
   return solicitar<any>(`/reservas/codigo/${codigo}`);
 }
+// Consultas de la base de datos institucional (view_report)
+// Consultas de la base de datos institucional (view_report)
+// Consultas de la base de datos institucional (view_report)
+export async function obtenerCampusInstitucional() {
+  return solicitar<any[]>("/institucional/campus");
+}
+
+export async function obtenerDependenciasInstitucionales() {
+  return solicitar<any[]>("/institucional/dependencias");
+}
+
+export async function obtenerFacultadesInstitucionales() {
+  return solicitar<any[]>("/institucional/facultades");
+}
+
+export async function obtenerProgramasInstitucionales() {
+  return solicitar<any[]>("/institucional/programas");
+}
+
+// Consultas de la base de datos institucional (view_report)
+// Consultas de la base de datos institucional (view_report)
+// Consultas de la base de datos institucional (view_report)

@@ -7,6 +7,8 @@ import authRoutes from './src/routes/authRoutes.js';
 import dashboardRoutes from './src/routes/dashboardRoutes.js'; 
 import reservasRoutes from './src/routes/reservasRoutes.js';
 import ceremoniasRoutes from './src/routes/ceremoniasRoutes.js';
+import historialRoutes from './src/routes/historialRoutes.js';
+import institucionalRoutes from './src/routes/institucionalRoutes.js';
 import { iniciarAutomatizacionEstadosSesiones } from './src/services/sesionesScheduler.js';
 
 dotenv.config();
@@ -37,6 +39,10 @@ app.use('/api/auth', authRoutes);
 app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/reservas', reservasRoutes);
 app.use('/api/ceremonias', ceremoniasRoutes);
+app.use('/api/historial', historialRoutes);
+
+//view_report data base
+app.use('/api/institucional', institucionalRoutes);
 
 
 app.get('/', (req, res) => {

@@ -1381,7 +1381,6 @@ export const listarAgenda = async (req, res) => {
       INNER JOIN campus c ON c.id_campus = e.id_campus
       ${where}
       ORDER BY sr.fecha_inicio ASC, sr.hora_inicio ASC
-      LIMIT 200
       `,
       valores
     );
@@ -1391,6 +1390,76 @@ export const listarAgenda = async (req, res) => {
     console.error('Error al listar agenda:', error);
     return res.status(500).json({
       mensaje: 'No se pudo obtener la agenda.',
+    });
+  }
+};
+// Historial de reservas (solo estados finalizados / gestionados)
+export const listarHistorialReservas = async (req, res) => {
+  try {
+    const { anio, mes, programa, busqueda } = req.query;
+
+    const condiciones = [
+      `sr.estado IN ('Aprobada', 'Rechazada', 'Cancelada', 'Finalizada')`
+    ];
+    const valores = [];
+
+    if (anio) {
+      valores.push(anio);
+      condiciones.push(`EXTRACT(YEAR FROM sr.fecha_inicio) = $${valores.length}`);
+    }
+
+    if (mes) {
+      valores.push(Number(mes));
+      condiciones.push(`EXTRACT(MONTH FROM sr.fecha_inicio) = $${valores.length}`);
+    }
+
+    if (programa) {
+      valores.push(`%${programa}%`);
+      condiciones.push(`p.nombre ILIKE $${valores.length}`);
+    }
+
+    if (busqueda) {
+      valores.push(`%${busqueda}%`);
+      condiciones.push(`(
+        sr.codigo_solicitud ILIKE $${valores.length}
+        OR s.nombre ILIKE $${valores.length}
+      )`);
+    }
+
+    const where = `WHERE ${condiciones.join(' AND ')}`;
+
+    const resultado = await pool.query(
+      `
+      SELECT
+        sr.id_solicitud AS id,
+        sr.codigo_solicitud AS codigo,
+        sr.fecha_inicio AS fecha,
+        sr.hora_inicio,
+        sr.hora_fin,
+        sr.estado,
+        sr.fecha_registro,
+        sr.fecha_actualizacion,
+        s.nombre AS solicitante,
+        s.tipo_solicitante AS tipo,
+        e.nombre AS espacio,
+        c.nombre AS campus,
+        p.nombre AS programa
+      FROM solicitud_reserva sr
+      INNER JOIN solicitante s ON s.id_solicitante = sr.id_solicitante
+      INNER JOIN espacio e ON e.id_espacio = sr.id_espacio
+      INNER JOIN campus c ON c.id_campus = e.id_campus
+      LEFT JOIN programa p ON p.id_programa = s.id_programa
+      ${where}
+      ORDER BY sr.fecha_inicio DESC, sr.fecha_registro DESC
+      `,
+      valores
+    );
+
+    return res.json(resultado.rows);
+  } catch (error) {
+    console.error('Error al consultar historial de reservas:', error);
+    return res.status(500).json({
+      mensaje: 'No se pudo consultar el historial de reservas.',
     });
   }
 };

@@ -11,7 +11,7 @@
     "crear:procesos-grado-prueba": "node crearProcesosGradoPrueba.js",
     "eliminar:procesos-grado-prueba": "node eliminarProcesosGradoPrueba.js"
   },
-  "keywords": [],
+  "keywords": [], 
   "author": "",
   "license": "ISC",
   "dependencies": {

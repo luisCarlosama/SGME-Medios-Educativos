@@ -107,9 +107,7 @@ export default function Graduandos() {
           <Typography variant="h4" sx={{ fontWeight: 700, color: '#0B1A2A', fontSize: '1.75rem', mb: 0.5 }}>
             Graduandos
           </Typography>
-          <Typography sx={{ color: '#5A6A7A', fontSize: '0.875rem' }}>
-            Eventos institucionales / Ceremonias de grado / Graduandos
-          </Typography>
+          
         </Box>
         <Box sx={{ display: 'flex', gap: 1.5, flexWrap: 'wrap' }}>
           <Button variant="outlined" startIcon={<AddIcon />}

@@ -5,17 +5,28 @@ import {
   DialogContent,
   Typography,
 } from "@mui/material";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 interface Props {
   open: boolean;
   onClose: () => void;
-  onExportar: (tipo: "externas" | "internas" | "todas", formato: "xlsx" | "pdf") => void;
+  onExportar: (
+    tipo: "externas" | "internas" | "todas",
+    formato: "xlsx" | "pdf"
+  ) => void;
 }
 
 export default function ModalExportar({ open, onClose, onExportar }: Props) {
   const [tipo, setTipo] = useState<"externas" | "internas" | "todas">("todas");
   const [formato, setFormato] = useState<"xlsx" | "pdf">("xlsx");
+
+  // Reiniciar valores cada vez que se abre el modal
+  useEffect(() => {
+    if (open) {
+      setTipo("todas");
+      setFormato("xlsx");
+    }
+  }, [open]);
 
   const handleExportar = () => {
     onExportar(tipo, formato);
@@ -35,6 +46,7 @@ export default function ModalExportar({ open, onClose, onExportar }: Props) {
     color: activo ? "#1E40AF" : "#334155",
     boxShadow: "none",
     flex: 1,
+    transition: "all 0.15s ease",
     "&:hover": {
       backgroundColor: activo ? "#DBEAFE" : "#F8FAFC",
       borderColor: activo ? "#60A5FA" : "#CBD5E1",

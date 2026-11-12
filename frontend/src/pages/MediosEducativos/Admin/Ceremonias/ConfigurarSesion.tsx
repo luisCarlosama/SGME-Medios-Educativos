@@ -163,9 +163,7 @@ export default function ConfigurarSesion() {
         >
           Configurar sesión
         </Typography>
-        <Typography sx={{ color: '#5A6A7A', fontSize: '0.875rem' }}>
-          Eventos institucionales / Ceremonias de grado / Detalle / Sesión
-        </Typography>
+        
       </Box>
 
       <Box

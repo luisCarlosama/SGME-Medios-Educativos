@@ -26,17 +26,59 @@ export default function FichaHistorica() {
   const location = useLocation();
   const navigate = useNavigate();
   const isReserva = location.pathname.includes('/reserva/');
-  const [ficha, setFicha] = useState<HistorialCeremonia | null>(null);
+
+  const [ficha, setFicha] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!id) return;
-    setLoading(true);
-    const loader = isReserva ? getReservaHistoricaById : getCeremoniaById;
-    loader(id)
-      .then(setFicha)
-      .finally(() => setLoading(false));
+    let activo = true;
+
+    const cargarFicha = async () => {
+      if (!id) {
+        setError("No se recibió el identificador del registro.");
+        setLoading(false);
+        return;
+      }
+
+      try {
+        setLoading(true);
+        setError(null);
+        setFicha(null);
+
+        const loader = isReserva
+          ? getReservaHistoricaById
+          : getCeremoniaById;
+
+        const resultado = await loader(id);
+
+        if (activo) {
+          setFicha(resultado);
+        }
+      } catch (err) {
+        console.error("Error al cargar el detalle histórico:", err);
+
+        if (activo) {
+          setError(
+            err instanceof Error
+              ? err.message
+              : "No fue posible cargar el registro histórico."
+          );
+        }
+      } finally {
+        if (activo) {
+          setLoading(false);
+        }
+      }
+    };
+
+    cargarFicha();
+
+    return () => {
+      activo = false;
+    };
   }, [id, isReserva]);
+
 
   if (loading) {
     return (
@@ -48,14 +90,18 @@ export default function FichaHistorica() {
     );
   }
 
+
   if (!ficha) {
     return (
       <AdminLayout>
-        <Box sx={{ textAlign: 'center', py: 8 }}>
-          <Typography color="text.secondary">Registro no encontrado</Typography>
+        <Box sx={{ textAlign: "center", py: 8 }}>
+          <Typography color="text.secondary">
+            {error || "Registro no encontrado"}
+          </Typography>
+
           <Button
-            onClick={() => navigate('/admin/historial')}
-            sx={{ mt: 2, textTransform: 'none' }}
+            onClick={() => navigate("/admin/historial")}
+            sx={{ mt: 2, textTransform: "none" }}
           >
             Volver al historial
           </Button>
@@ -64,10 +110,177 @@ export default function FichaHistorica() {
     );
   }
 
+
   const titleLabel = isReserva ? 'Reserva' : 'Ceremonia';
   const breadcrumb = isReserva
-    ? 'Eventos institucionales / Reservas / Registro histórico'
-    : 'Eventos institucionales / Ceremonias de grado / Registro histórico';
+    ? 'Consulta de la información y trazabilidad de la reserva.'
+    : 'Consulta de la información y trazabilidad de la ceremonia de grado.';
+
+
+  if (isReserva) {
+    const datos = [
+      ["Solicitante", ficha.solicitante?.nombre],
+      ["Tipo de solicitante", ficha.solicitante?.tipo],
+      ["Correo electrónico", ficha.solicitante?.correo],
+      ["Número de contacto", ficha.solicitante?.numero_contacto],
+      ["Identificación", ficha.solicitante?.identificacion],
+      ["Programa", ficha.solicitante?.programa],
+      ["Dependencia", ficha.solicitante?.dependencia],
+      ["Área", ficha.solicitante?.area],
+      ["Departamento", ficha.solicitante?.departamento],
+      ["Entidad", ficha.solicitante?.nombre_entidad],
+      ["Tipo de entidad", ficha.solicitante?.tipo_entidad],
+      ["Ciudad", ficha.solicitante?.ciudad],
+      ["Espacio", ficha.espacio],
+      ["Campus", ficha.campus],
+      ["Fecha inicial", ficha.fecha_inicio],
+      ["Fecha final", ficha.fecha_fin],
+      ["Hora de inicio", ficha.hora_inicio],
+      ["Hora de finalización", ficha.hora_fin],
+      ["Medios requeridos", ficha.medios_requeridos],
+      ["Observaciones", ficha.observaciones],
+    ];
+
+    return (
+      <AdminLayout>
+        <Box sx={{ mb: 3 }}>
+          <Typography variant="h4" sx={{ fontWeight: 700, color: "#0B1A2A" }}>
+            Detalle de reserva
+          </Typography>
+
+          <Typography sx={{ color: "#5A6A7A", mt: 0.5 }}>
+            Información general y trazabilidad de la solicitud de reserva.
+          </Typography>
+        </Box>
+
+        <Typography sx={{ fontWeight: 700, fontSize: "1.15rem", mb: 2 }}>
+          {ficha.codigo} · {ficha.nombre_actividad || "Reserva"}
+        </Typography>
+
+        <Box
+          sx={{
+            backgroundColor: "#0B3A5C",
+            color: "#FFFFFF",
+            borderRadius: 2,
+            p: 3,
+            mb: 3,
+          }}
+        >
+          <Typography sx={{ fontWeight: 600 }}>
+            {ficha.fechaLarga}
+          </Typography>
+          <Typography>
+            {ficha.espacio} · {ficha.campus}
+          </Typography>
+          <Typography sx={{ mt: 1 }}>
+            Estado: {ficha.estado}
+          </Typography>
+        </Box>
+
+        <Card elevation={0} sx={{ border: "1px solid #E5EAF0", borderRadius: 2 }}>
+          <CardContent sx={{ p: 3 }}>
+            <Typography sx={{ fontWeight: 700, mb: 2 }}>
+              Información de la solicitud
+            </Typography>
+
+            <Box
+              sx={{
+                display: "grid",
+                gridTemplateColumns: { xs: "1fr", md: "1fr 1fr" },
+                gap: 2,
+              }}
+            >
+              {datos.map(([etiqueta, valor]) => (
+                <Box key={etiqueta}>
+                  <Typography sx={{ color: "#5A6A7A", fontSize: "0.8rem" }}>
+                    {etiqueta}
+                  </Typography>
+                  <Typography sx={{ fontWeight: 500, color: "#1A2A3A" }}>
+                    {valor || "—"}
+                  </Typography>
+                </Box>
+              ))}
+            </Box>
+          </CardContent>
+        </Card>
+
+        {ficha.es_recurrente && (
+          <Card
+            elevation={0}
+            sx={{ border: "1px solid #E5EAF0", borderRadius: 2, mt: 2 }}
+          >
+            <CardContent sx={{ p: 3 }}>
+              <Typography sx={{ fontWeight: 700, mb: 2 }}>
+                Recurrencia de la reserva
+              </Typography>
+
+              <Typography>
+                Frecuencia: {ficha.frecuencia_recurrencia || "—"}
+              </Typography>
+
+              <Typography sx={{ mt: 1 }}>
+                Días: {Array.isArray(ficha.dias_semana)
+                  ? ficha.dias_semana.join(", ")
+                  : ficha.dias_semana || "—"}
+              </Typography>
+
+              <Typography sx={{ fontWeight: 600, mt: 2, mb: 1 }}>
+                Ocurrencias registradas
+              </Typography>
+
+              {ficha.ocurrencias?.length > 0 ? (
+                ficha.ocurrencias.map((oc: any, index: number) => (
+                  <Box
+                    key={`${oc.fecha_inicio}-${index}`}
+                    sx={{
+                      py: 1,
+                      borderBottom: "1px solid #E5EAF0",
+                    }}
+                  >
+                    {oc.fecha_inicio} · {oc.hora_inicio} – {oc.hora_fin}
+                  </Box>
+                ))
+              ) : (
+                <Typography color="text.secondary">
+                  No hay ocurrencias registradas.
+                </Typography>
+              )}
+            </CardContent>
+          </Card>
+        )}
+
+        {(ficha.motivo_cancelacion || ficha.estado === "Rechazada") && (
+          <Card
+            elevation={0}
+            sx={{ border: "1px solid #E5EAF0", borderRadius: 2, mt: 2 }}
+          >
+            <CardContent sx={{ p: 3 }}>
+              <Typography sx={{ fontWeight: 700, mb: 1 }}>
+                Motivo de gestión
+              </Typography>
+              <Typography>
+                {ficha.motivo_cancelacion || "—"}
+              </Typography>
+            </CardContent>
+          </Card>
+        )}
+
+        <Typography sx={{ color: "#5A6A7A", fontSize: "0.85rem", mt: 3 }}>
+          Registro histórico de consulta. Esta reserva no se puede editar desde
+          esta ficha.
+        </Typography>
+
+        <Button
+          variant="outlined"
+          onClick={() => navigate("/admin/historial")}
+          sx={{ mt: 2, textTransform: "none" }}
+        >
+          Volver al historial
+        </Button>
+      </AdminLayout>
+    );
+  }
+
 
   const kpis = [
     { label: 'Sesiones', value: ficha.sesiones ?? '—' },
@@ -104,7 +317,7 @@ export default function FichaHistorica() {
               mb: 0.5,
             }}
           >
-            Ficha histórica — {titleLabel}
+            Detalle {titleLabel}
           </Typography>
           <Typography sx={{ color: '#5A6A7A', fontSize: '0.875rem' }}>
             {breadcrumb}

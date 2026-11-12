@@ -230,7 +230,7 @@ export default function GraduandoDetalle({ modoGraduando = false }: GraduandoDet
         <Typography sx={{ color: '#5A6A7A', fontSize: '0.875rem' }}>
           {modoGraduando
             ? 'Consulta tu ficha y gestiona tus invitados.'
-            : 'Eventos institucionales / Ceremonias de grado / Graduandos / Detalle'}
+            : ''}
         </Typography>
       </Box>
       {loadError && <Alert severity="error" sx={{ mb: 2 }}>{loadError}</Alert>}

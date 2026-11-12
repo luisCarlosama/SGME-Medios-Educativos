@@ -458,9 +458,7 @@ export default function DetalleCeremonia() {
         <Typography variant="h4" sx={{ fontWeight: 700, color: '#0B1A2A', fontSize: '1.75rem', mb: 0.5 }}>
           Detalle de ceremonia — Resumen
         </Typography>
-        <Typography sx={{ color: '#5A6A7A', fontSize: '0.875rem' }}>
-          Eventos institucionales / Ceremonias de grado / Resumen
-        </Typography>
+        
       </Box>
       {asignacionSesionSuccess && (
         <Alert severity="success" sx={{ mb: 2 }}>

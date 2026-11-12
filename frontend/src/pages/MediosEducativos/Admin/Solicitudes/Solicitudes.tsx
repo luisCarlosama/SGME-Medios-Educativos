@@ -51,7 +51,7 @@ export default function Solicitudes() {
 
   // Filtros
   const [busqueda, setBusqueda] = useState("");
-  const [estado, setEstado] = useState("");
+  //const [estado, setEstado] = useState("");
   const [tipo, setTipo] = useState("");
   const [campus, setCampus] = useState("");
   const [fecha, setFecha] = useState("");
@@ -63,7 +63,10 @@ export default function Solicitudes() {
     setError("");
     try {
       const data = await listarSolicitudes(filtros);
-      setSolicitudes(data);
+
+      // Solo se muestran las que aún no se han resuelto
+      const pendientes = data.filter((s: any) => s.estado === "Pendiente");
+      setSolicitudes(pendientes);
     } catch (err: unknown) {
       setError(
         err instanceof Error
@@ -82,7 +85,7 @@ export default function Solicitudes() {
   const handleFiltrar = () => {
     const filtros: Record<string, string> = {};
     if (busqueda.trim()) filtros.busqueda = busqueda.trim();
-    if (estado) filtros.estado = estado;
+    //if (estado) filtros.estado = estado;
     if (tipo) filtros.tipo = tipo;
     if (campus) filtros.campus = campus;
     if (fecha) filtros.fecha = fecha;
@@ -93,7 +96,7 @@ export default function Solicitudes() {
 
   const handleLimpiar = () => {
     setBusqueda("");
-    setEstado("");
+    //setEstado("");
     setTipo("");
     setCampus("");
     setFecha("");
@@ -197,6 +200,7 @@ export default function Solicitudes() {
             />
 
             {/* Estado */}
+            {/* ========== FILTRO ESTADO (oculto por ahora - solo se muestran Pendientes) ==========
             <FormControl size="small" sx={{ minWidth: 120 }}>
               <Select
                 displayEmpty
@@ -218,7 +222,7 @@ export default function Solicitudes() {
                 <MenuItem value="Cancelada">Cancelada</MenuItem>
               </Select>
             </FormControl>
-
+========== FIN FILTRO ESTADO ========== */}
             {/* Campus */}
             <FormControl size="small" sx={{ minWidth: 120 }}>
               <Select
@@ -515,7 +519,7 @@ export default function Solicitudes() {
             color: "#94A3B8",
           }}
         >
-        
+
         </Typography>
       </Box>
     </AdminLayout>

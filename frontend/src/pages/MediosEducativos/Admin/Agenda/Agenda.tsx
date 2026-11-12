@@ -145,6 +145,7 @@ export default function Agenda() {
 
   const handleAplicar = () => cargarAgenda();
 
+
   const handleLimpiar = () => {
     setCampusTab("Todos");
     setFecha("");
@@ -152,32 +153,71 @@ export default function Agenda() {
     setIdEspacio("");
     setTipo("");
     setBusqueda("");
-    cargarAgenda({});
+
+    cargarAgenda({
+      campus: "",
+      fecha: "",
+      tipo_espacio: "",
+      espacio: "",
+      tipo: "",
+      busqueda: "",
+    });
   };
 
+
   const handleExportar = async (
-    _tipo: "externas" | "internas" | "todas",
+    tipoSeleccionado: "externas" | "internas" | "todas",
     formato: "xlsx" | "pdf"
   ) => {
-    if (!reservas.length) {
-      alert("No hay reservas para exportar.");
+    // Los filtros de Agenda ya fueron aplicados al cargar "reservas".
+    // Aquí solo aplicamos el tipo elegido en el modal.
+    const reservasExportar = reservas.filter((r) => {
+      const tipoReserva = String(r.tipo ?? "").trim().toLowerCase();
+
+      if (tipoSeleccionado === "todas") return true;
+
+      if (tipoSeleccionado === "internas") {
+        return ["interno", "interna", "institucional"].includes(tipoReserva);
+      }
+
+      if (tipoSeleccionado === "externas") {
+        return ["externo", "externa"].includes(tipoReserva);
+      }
+
+      return false;
+    });
+
+    if (!reservasExportar.length) {
+      alert("No hay reservas del tipo seleccionado para exportar.");
       return;
     }
 
-    const filas = reservas.map((r, i) => ({
-      "N°": i + 1,
-      Código: r.codigo,
-      Actividad: r.actividad,
-      Tipo: r.tipo === "interno" ? "Institucional" : "Externa",
-      Solicitante: r.solicitante,
-      Espacio: r.espacio,
-      Campus: r.campus,
-      "Fecha reserva": formatearFecha(r.fecha),
-      Horario: `${formatearHora(r.hora_inicio)} - ${formatearHora(r.hora_fin)}`,
-      Estado: r.estado,
-    }));
+    const filas = reservasExportar.map((r, i) => {
+      const tipoReserva = String(r.tipo ?? "").trim().toLowerCase();
 
-    const fechaGen = new Date().toISOString().slice(0, 10);
+      return {
+        "N°": i + 1,
+        Código: r.codigo,
+        Actividad: r.actividad,
+        Tipo: ["interno", "interna", "institucional"].includes(tipoReserva)
+          ? "Institucional"
+          : "Externa",
+        Solicitante: r.solicitante,
+        Espacio: r.espacio,
+        Campus: r.campus,
+        "Fecha reserva": formatearFecha(r.fecha),
+        Horario: `${formatearHora(r.hora_inicio)} - ${formatearHora(r.hora_fin)}`,
+        Estado: r.estado,
+      };
+    });
+
+    // Fecha local para evitar cambios de día por conversión UTC.
+    const ahora = new Date();
+    const fechaGen = [
+      ahora.getFullYear(),
+      String(ahora.getMonth() + 1).padStart(2, "0"),
+      String(ahora.getDate()).padStart(2, "0"),
+    ].join("-");
 
     if (formato === "xlsx") {
       const wb = XLSX.utils.book_new();
@@ -191,18 +231,20 @@ export default function Agenda() {
     doc.setFontSize(14);
     doc.text("SGME - Agenda de reservas", 14, 15);
     doc.setFontSize(10);
-    doc.text(`Generado: ${new Date().toLocaleString("es-CO")}`, 14, 22);
+    doc.text(`Generado: ${ahora.toLocaleString("es-CO")}`, 14, 22);
+    doc.text(`Registros exportados: ${filas.length}`, 14, 27);
 
     autoTable(doc, {
-      startY: 28,
+      startY: 32,
       head: [Object.keys(filas[0])],
-      body: filas.map((f) => Object.values(f)),
+      body: filas.map((f) => Object.values(f).map((v) => String(v ?? ""))),
       styles: { fontSize: 7 },
       headStyles: { fillColor: [30, 58, 95] },
     });
 
     doc.save(`SGME_Agenda_${fechaGen}.pdf`);
   };
+
 
   const tabsCampus = ["Todos", ...campusLista.map((c) => c.nombre)];
 
@@ -324,10 +366,14 @@ export default function Agenda() {
             <TextField
               size="small"
               type="date"
-              label="Fecha"
+              label=""
               value={fecha}
               onChange={(e) => setFecha(e.target.value)}
-              InputLabelProps={{ shrink: true }}
+              slotProps={{
+                inputLabel: {
+                  shrink: true,
+                },
+              }}
               sx={{
                 minWidth: 150,
                 "& input": { color: fecha ? "#0F172A" : "#94A3B8" },

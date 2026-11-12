@@ -312,10 +312,7 @@ export default function ControlIngreso() {
         <Typography variant="h4" sx={{ fontWeight: 700, color: '#0B1A2A', fontSize: '1.5rem', mb: 0.5 }}>
           {ceremonia?.codigo || '—'} · Control de ingreso{selectedSession ? ` — ${sesionLabel}` : ''}
         </Typography>
-        <Typography sx={{ color: '#5A6A7A', fontSize: '0.875rem' }}>
-          Eventos institucionales / Ceremonias de grado / Control de ingreso
-          {selectedSession ? ` / ${sesionLabel}` : ''}
-        </Typography>
+        
       </Box>
 
       {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}

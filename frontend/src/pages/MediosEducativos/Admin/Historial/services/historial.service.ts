@@ -1,264 +1,126 @@
-/**
- * Servicio de Historial (reservas y ceremonias).
- * Datos ficticios del prototipo. Listo para Axios.
- */
+const API_URL = import.meta.env.VITE_API_URL || "http://localhost:6001/api";
 
-import type {
-  HistorialReserva,
-  HistorialCeremonia,
-  HistorialFilters,
-  HistorialListResponse,
-} from '../interfaces/historial.interface';
+async function solicitar<T>(ruta: string, opciones?: RequestInit): Promise<T> {
+  const respuesta = await fetch(`${API_URL}${ruta}`, {
+    ...opciones,
+    headers: {
+      "Content-Type": "application/json",
+      ...opciones?.headers,
+    },
+  });
 
-const MOCK_RESERVAS: HistorialReserva[] = [
-  {
-    id: 'r21',
-    codigo: 'SOL-021',
-    fecha: '28/08/2026',
-    fechaISO: '2026-08-28',
-    programa: null,
-    espacio: null,
-    estado: 'Finalizada',
-    anio: 2026,
-    mes: 8,
-  },
-  {
-    id: 'r20',
-    codigo: 'SOL-020',
-    fecha: '25/08/2026',
-    fechaISO: '2026-08-25',
-    programa: null,
-    espacio: null,
-    estado: 'Finalizada',
-    anio: 2026,
-    mes: 8,
-  },
-  {
-    id: 'r19',
-    codigo: 'SOL-019',
-    fecha: '20/08/2026',
-    fechaISO: '2026-08-20',
-    programa: null,
-    espacio: null,
-    estado: 'Finalizada',
-    anio: 2026,
-    mes: 8,
-  },
-  {
-    id: 'r18',
-    codigo: 'SOL-018',
-    fecha: '15/08/2026',
-    fechaISO: '2026-08-15',
-    programa: null,
-    espacio: null,
-    estado: 'Finalizada',
-    anio: 2026,
-    mes: 8,
-  },
-];
+  const datos = await respuesta.json().catch(() => ({}));
 
-const MOCK_CEREMONIAS: HistorialCeremonia[] = [
-  {
-    id: 'c25',
-    codigo: 'CER-025',
-    ceremonia: 'Ceremonia de grados',
-    fecha: '29/08/2026',
-    fechaISO: '2026-08-29',
-    programa: 'Ingeniería de Sistemas',
-    estado: 'Finalizada',
-    anio: 2026,
-    mes: 8,
-    fechaLarga: '29 de agosto de 2026',
-    espacio: 'Auditorio San Francisco',
-    campus: 'Campus Centro',
-    sesiones: null,
-    programasCount: null,
-    graduandos: 120,
-    invitados: 342,
-    ingresosRegistrados: 118,
-  },
-  {
-    id: 'c24',
-    codigo: 'CER-024',
-    ceremonia: 'Ceremonia de grados',
-    fecha: '15/08/2026',
-    fechaISO: '2026-08-15',
-    programa: 'Psicología',
-    estado: 'Finalizada',
-    anio: 2026,
-    mes: 8,
-    fechaLarga: '15 de agosto de 2026',
-    espacio: 'Auditorio San Francisco',
-    campus: 'Campus Centro',
-    sesiones: null,
-    programasCount: null,
-    graduandos: 95,
-    invitados: 280,
-    ingresosRegistrados: 90,
-  },
-  {
-    id: 'c23',
-    codigo: 'CER-023',
-    ceremonia: 'Ceremonia de grados',
-    fecha: '01/08/2026',
-    fechaISO: '2026-08-01',
-    programa: 'Administración',
-    estado: 'Finalizada',
-    anio: 2026,
-    mes: 8,
-    fechaLarga: '1 de agosto de 2026',
-    espacio: 'Auditorio San Francisco',
-    campus: 'Campus Centro',
-    sesiones: null,
-    programasCount: null,
-    graduandos: 110,
-    invitados: 310,
-    ingresosRegistrados: 105,
-  },
-  {
-    id: 'c22',
-    codigo: 'CER-022',
-    ceremonia: 'Ceremonia de grados',
-    fecha: '18/07/2026',
-    fechaISO: '2026-07-18',
-    programa: 'Educación',
-    estado: 'Finalizada',
-    anio: 2026,
-    mes: 7,
-    fechaLarga: '18 de julio de 2026',
-    espacio: 'Auditorio San Francisco',
-    campus: 'Campus Centro',
-    sesiones: null,
-    programasCount: null,
-    graduandos: 88,
-    invitados: 250,
-    ingresosRegistrados: 82,
-  },
-];
-
-function applyFilters<T extends { anio: number; mes: number; programa?: string | null; codigo: string }>(
-  data: T[],
-  filters?: HistorialFilters
-): T[] {
-  let result = [...data];
-  if (!filters) return result;
-
-  if (filters.anio && filters.anio !== 'Todos') {
-    result = result.filter((r) => String(r.anio) === filters.anio);
-  }
-  if (filters.mes && filters.mes !== 'Todos') {
-    result = result.filter((r) => String(r.mes) === filters.mes);
-  }
-  if (filters.programa && filters.programa !== 'Todos los programas') {
-    result = result.filter(
-      (r) => r.programa && r.programa === filters.programa
+  if (!respuesta.ok) {
+    throw new Error(
+      (datos as { mensaje?: string }).mensaje ||
+        "No fue posible comunicarse con el servidor."
     );
   }
-  if (filters.codigo) {
-    const q = filters.codigo.toLowerCase();
-    result = result.filter((r) => r.codigo.toLowerCase().includes(q));
-  }
-  return result;
+
+  return datos as T;
 }
 
-/**
- * En producción: return axios.get('/api/historial/reservas', { params: filters })
- */
-export async function getHistorialReservas(
-  filters?: HistorialFilters
-): Promise<HistorialListResponse<HistorialReserva>> {
-  await new Promise((r) => setTimeout(r, 220));
-  const data = applyFilters(MOCK_RESERVAS, filters);
-  return { data, total: data.length };
+export async function listarHistorialReservas(
+  filtros: Record<string, string> = {}
+) {
+  const params = new URLSearchParams();
+  Object.entries(filtros).forEach(([key, value]) => {
+    if (value) params.set(key, value);
+  });
+  const query = params.toString();
+  return solicitar<any[]>(`/historial/reservas${query ? `?${query}` : ""}`);
 }
 
-/**
- * En producción: return axios.get('/api/historial/ceremonias', { params: filters })
- */
-export async function getHistorialCeremonias(
-  filters?: HistorialFilters
-): Promise<HistorialListResponse<HistorialCeremonia>> {
-  await new Promise((r) => setTimeout(r, 220));
-  const data = applyFilters(MOCK_CEREMONIAS, filters);
-  return { data, total: data.length };
+export async function listarHistorialCeremonias(
+  filtros: Record<string, string> = {}
+) {
+  const params = new URLSearchParams();
+  params.set("estado", "Finalizada");
+  if (filtros.nombre) params.set("nombre", filtros.nombre);
+  if (filtros.fecha) params.set("fecha", filtros.fecha);
+
+  const resultado = await solicitar<{ data: any[]; total: number }>(
+    `/ceremonias?${params.toString()}`
+  );
+  return resultado.data || [];
 }
 
-/**
- * En producción: return axios.get(`/api/historial/ceremonias/${id}`)
- */
-export async function getCeremoniaById(
-  id: string
-): Promise<HistorialCeremonia | null> {
-  await new Promise((r) => setTimeout(r, 180));
-  return MOCK_CEREMONIAS.find((c) => c.id === id) ?? null;
-}
 
-/**
- * Ficha de reserva histórica (reutiliza estructura de ceremonia para la vista de detalle).
- * En producción: return axios.get(`/api/historial/reservas/${id}`)
- */
-export async function getReservaHistoricaById(
-  id: string
-): Promise<HistorialCeremonia | null> {
-  await new Promise((r) => setTimeout(r, 180));
-  const r = MOCK_RESERVAS.find((x) => x.id === id);
-  if (!r) return null;
+export async function getReservaHistoricaById(id: string | number) {
+  const data = await solicitar<any>(`/reservas/${id}`);
+
   return {
-    id: r.id,
-    codigo: r.codigo,
-    ceremonia: 'Solicitud de reserva',
-    fecha: r.fecha,
-    fechaISO: r.fechaISO,
-    programa: r.programa || '—',
-    estado: r.estado,
-    anio: r.anio,
-    mes: r.mes,
-    fechaLarga: r.fecha,
-    espacio: r.espacio || '—',
-    campus: '—',
-    sesiones: null,
-    programasCount: null,
+    id: data.id,
+    codigo: data.codigo,
+    ceremonia: data.nombre_actividad || "Reserva",
+    fecha: data.fecha_inicio,
+    fechaLarga: data.fecha_inicio
+      ? `${data.fecha_inicio}${
+          data.fecha_fin && data.fecha_fin !== data.fecha_inicio
+            ? ` → ${data.fecha_fin}`
+            : ""
+        }`
+      : "—",
+
+    espacio: data.espacio?.nombre || "—",
+    campus: data.espacio?.campus || "—",
+    estado: data.estado,
+
+    sesiones: "—",
+    programasCount: data.solicitante?.programa ? 1 : "—",
+    programas: data.solicitante?.programa || "—",
     graduandos: 0,
     invitados: 0,
+    ingresosRegistrados: 0,
+
+    // Datos completos de la reserva
+    solicitante: data.solicitante,
+    hora_inicio: data.hora_inicio,
+    hora_fin: data.hora_fin,
+    fecha_inicio: data.fecha_inicio,
+    fecha_fin: data.fecha_fin,
+    nombre_actividad: data.nombre_actividad,
+    observaciones: data.observaciones,
+    motivo_cancelacion: data.motivo_cancelacion,
+    medios_requeridos: data.medios_requeridos,
+    es_recurrente: data.es_recurrente,
+    frecuencia_recurrencia: data.frecuencia_recurrencia,
+    dias_semana: data.dias_semana,
+    ocurrencias: data.ocurrencias,
+    fecha_registro: data.fecha_registro,
+    fecha_actualizacion: data.fecha_actualizacion,
+  };
+}
+
+export async function getCeremoniaById(id: string | number) {
+  const data = await solicitar<any>(`/ceremonias/${id}`);
+
+  return {
+    id: data.id,
+    codigo: data.codigo,
+    ceremonia: data.nombre,
+    fecha: data.fecha,
+    fechaLarga: data.fecha,
+    espacio: data.lugar || "—",
+    campus: data.campus || "—",
+    estado: data.estado,
+    sesiones: data.sesiones ?? "—",
+    programasCount: "—",
+    programas: "—",
+    graduandos: data.graduandos ?? 0,
+    invitados: data.invitados ?? 0,
     ingresosRegistrados: 0,
   };
 }
 
-export const ANIO_OPTIONS = ['Todos', '2026', '2025', '2024'];
-export const MES_OPTIONS = [
-  'Todos',
-  '1',
-  '2',
-  '3',
-  '4',
-  '5',
-  '6',
-  '7',
-  '8',
-  '9',
-  '10',
-  '11',
-  '12',
-];
-export const MES_LABELS: Record<string, string> = {
-  Todos: 'Todos',
-  '1': 'Enero',
-  '2': 'Febrero',
-  '3': 'Marzo',
-  '4': 'Abril',
-  '5': 'Mayo',
-  '6': 'Junio',
-  '7': 'Julio',
-  '8': 'Agosto',
-  '9': 'Septiembre',
-  '10': 'Octubre',
-  '11': 'Noviembre',
-  '12': 'Diciembre',
-};
-export const PROGRAMA_OPTIONS = [
-  'Todos los programas',
-  'Ingeniería de Sistemas',
-  'Psicología',
-  'Administración',
-  'Educación',
-];
+export async function obtenerProgramasCatalogo() {
+  const data = await solicitar<{ programas: { id_programa?: number; id?: number; nombre: string }[] }>(
+    `/reservas/catalogos-institucionales`
+  );
+
+  return (data.programas || []).map((p) => ({
+    id: p.id_programa ?? p.id ?? 0,
+    nombre: p.nombre,
+  }));
+}

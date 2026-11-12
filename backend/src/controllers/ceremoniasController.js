@@ -15,10 +15,6 @@ const MAX_FOTOS_CEREMONIA = 4;
 const MAX_FOTO_BYTES = 3 * 1024 * 1024;
 const TIPOS_FOTO = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif']);
 
-function versionFoto(contenido) {
-  return createHash('sha256').update(contenido).digest('hex');
-}
-
 const SELECT_CEREMONIAS = `
   SELECT
     c.id_ceremonia::text AS id,
@@ -38,9 +34,19 @@ const SELECT_CEREMONIAS = `
     (
       SELECT COUNT(*)::integer
       FROM public.invitado i
-      INNER JOIN public.graduando g ON g.id_graduando = i.id_graduando
+      INNER JOIN public.graduando g
+        ON g.id_graduando = i.id_graduando
       WHERE g.id_ceremonia = c.id_ceremonia
     ) AS invitados,
+    (
+      SELECT STRING_AGG(DISTINCT p.nombre, ', ' ORDER BY p.nombre)
+      FROM public.graduando g
+      INNER JOIN public.graduando_programa gp
+        ON gp.id_graduando = g.id_graduando
+      INNER JOIN public.programa p
+        ON p.id_programa = gp.id_programa
+      WHERE g.id_ceremonia = c.id_ceremonia
+    ) AS programas,
     c.estado,
     c.max_invitados_por_graduando AS "maxInvitadosPorGraduando",
     c.cupo_invitados AS "cupoInvitados"

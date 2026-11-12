@@ -636,6 +636,7 @@ export default function FormularioReserva() {
       </Box>
 
       <Container maxWidth="lg" sx={{ py: 4 }}>
+
         {/* ========== PESTAÑAS DE FIGMA ========== */}
         <Box
           sx={{
