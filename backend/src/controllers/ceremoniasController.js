@@ -15,6 +15,10 @@ const MAX_FOTOS_CEREMONIA = 4;
 const MAX_FOTO_BYTES = 3 * 1024 * 1024;
 const TIPOS_FOTO = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif']);
 
+function versionFoto(contenido) {
+  return createHash('sha256').update(contenido).digest('hex');
+}
+
 const SELECT_CEREMONIAS = `
   SELECT
     c.id_ceremonia::text AS id,
