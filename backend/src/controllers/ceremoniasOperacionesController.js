@@ -1,9 +1,11 @@
 import pool from '../db.js';
+import { actualizarSesionesPorHorario } from '../services/estadoSesiones.js';
+import { consultarRequisitosInicioCeremonia } from '../services/requisitosInicioCeremonia.js';
+import { prepararSincronizacionGrados } from '../services/sincronizacionGradosPrueba.js';
 
 const ID_INTEGER_REGEX = /^[1-9]\d*$/;
 const ESTADOS_CEREMONIA = new Set(['Programada', 'En curso', 'Finalizada', 'Cancelada']);
 const ESTADOS_SESION_CONFIGURABLES = new Set(['Programada', 'En curso', 'Finalizada']);
-const ESTADOS_AUTORIZACION = new Set(['Autorizado', 'Pendiente']);
 const MAX_FILAS_IMPORTACION = 1000;
 const HORA_MINIMA_CEREMONIA = '07:00';
 const HORA_MAXIMA_CEREMONIA = '20:00';
@@ -110,6 +112,7 @@ async function obtenerSesion(executor, id) {
        s.numero_sesion AS "numeroSesion",
        s.nombre,
        s.estado,
+       s.estado_manual AS "estadoManual",
        TO_CHAR(s.hora_inicio, 'HH24:MI') AS "horaInicio",
        TO_CHAR(s.hora_fin, 'HH24:MI') AS "horaFin",
        COALESCE(
@@ -408,6 +411,9 @@ export async function actualizarSesion(req, res) {
     if (!ESTADOS_SESION_CONFIGURABLES.has(estadoSolicitado)) {
       throw errorHttp(400, 'El estado de la sesión no es válido.');
     }
+    if (req.body?.estadoManual !== undefined && typeof req.body.estadoManual !== 'boolean') {
+      throw errorHttp(400, 'El modo de estado de la sesión no es válido.');
+    }
     const { horaInicio, horaFin } = validarHorario(req.body ?? {});
     if (!horaInicio || !horaFin) {
       throw errorHttp(400, 'Configura una hora de inicio y finalización para la sesión.');
@@ -417,32 +423,62 @@ export async function actualizarSesion(req, res) {
     await client.query('BEGIN');
     transaccion = true;
     const sesionResultado = await client.query(
-      `SELECT id_sesion::text AS id, id_ceremonia::text AS "ceremoniaId", estado
+      `SELECT id_sesion::text AS id, id_ceremonia::text AS "ceremoniaId"
        FROM public.sesion
-       WHERE id_sesion = $1
-       FOR UPDATE`,
+       WHERE id_sesion = $1`,
       [req.params.id],
     );
     const sesionActual = sesionResultado.rows[0];
     if (!sesionActual) throw errorHttp(404, 'La sesión no existe.');
-    const ceremonia = await obtenerCeremonia(client, sesionActual.ceremoniaId);
+    const ceremonia = await obtenerCeremonia(client, sesionActual.ceremoniaId, true);
     if (!ceremonia) throw errorHttp(404, 'La ceremonia de la sesión no existe.');
+    const sesionBloqueada = await client.query(
+      `SELECT estado, estado_manual AS "estadoManual" FROM public.sesion
+       WHERE id_sesion = $1 AND id_ceremonia = $2
+       FOR UPDATE`,
+      [req.params.id, sesionActual.ceremoniaId],
+    );
+    if (sesionBloqueada.rowCount === 0) {
+      throw errorHttp(409, 'La sesión ya no pertenece a esta ceremonia.');
+    }
 
+    const estadoAnterior = sesionBloqueada.rows[0];
+    const cambioManual = estadoAnterior.estado !== 'Pendiente'
+      && estadoSolicitado !== estadoAnterior.estado;
+    const estadoManual = req.body?.estadoManual ?? (cambioManual || estadoAnterior.estadoManual);
     let estado = estadoSolicitado;
-    if (estadoSolicitado === 'Programada') {
+    if (!estadoManual) {
       const estadoPorHorario = await client.query(
         `SELECT CASE
+           WHEN $4 <> 'En curso' THEN 'Programada'
            WHEN $1::time IS NULL OR $2::time IS NULL THEN 'Programada'
            WHEN $3::date + $2::time <= LOCALTIMESTAMP THEN 'Finalizada'
            WHEN $3::date + $1::time <= LOCALTIMESTAMP THEN 'En curso'
            ELSE 'Programada'
          END AS estado`,
-        [horaInicio, horaFin, ceremonia.fecha],
+        [horaInicio, horaFin, ceremonia.fecha, ceremonia.estado],
       );
       estado = estadoPorHorario.rows[0].estado;
     }
 
     const programaIds = await resolverProgramasPorNombre(client, req.body?.programas);
+    if (programaIds.length > 0) {
+      const conflicto = await client.query(
+        `SELECT p.nombre AS programa, s.nombre AS sesion
+         FROM public.sesion_programa sp
+         INNER JOIN public.sesion s ON s.id_sesion = sp.id_sesion
+         INNER JOIN public.programa p ON p.id_programa = sp.id_programa
+         WHERE s.id_ceremonia = $1 AND s.id_sesion <> $2
+           AND sp.id_programa = ANY($3::integer[])
+         ORDER BY p.nombre, s.numero_sesion
+         LIMIT 1`,
+        [sesionActual.ceremoniaId, req.params.id, programaIds],
+      );
+      if (conflicto.rowCount > 0) {
+        const { programa, sesion } = conflicto.rows[0];
+        throw errorHttp(409, `El programa ${programa} ya está asignado a la sesión ${sesion} de esta ceremonia.`);
+      }
+    }
     if (programaIds.length === 0) {
       const graduandosAsignados = await client.query(
         'SELECT 1 FROM public.graduando WHERE id_sesion = $1 LIMIT 1',
@@ -468,9 +504,9 @@ export async function actualizarSesion(req, res) {
 
     await client.query(
       `UPDATE public.sesion
-      SET nombre = $2, estado = $3, hora_inicio = $4::time, hora_fin = $5::time
+      SET nombre = $2, estado = $3, hora_inicio = $4::time, hora_fin = $5::time, estado_manual = $6
       WHERE id_sesion = $1`,
-      [req.params.id, nombre, estado, horaInicio, horaFin],
+      [req.params.id, nombre, estado, horaInicio, horaFin, estadoManual],
     );
     await client.query(
       'DELETE FROM public.sesion_programa WHERE id_sesion = $1',
@@ -512,6 +548,17 @@ export async function actualizarSesion(req, res) {
   }
 }
 
+export async function obtenerRequisitosInicioCeremonia(req, res) {
+  try {
+    validarId(req.params.id, 'ceremonia');
+    const ceremonia = await obtenerCeremonia(pool, req.params.id);
+    if (!ceremonia) throw errorHttp(404, 'La ceremonia no existe.');
+    return res.json(await consultarRequisitosInicioCeremonia(pool, req.params.id));
+  } catch (error) {
+    return responderError(res, error, 'No fue posible consultar los requisitos para iniciar la ceremonia.');
+  }
+}
+
 export async function actualizarEstadoCeremonia(req, res) {
   let client;
   let transaccion = false;
@@ -527,6 +574,12 @@ export async function actualizarEstadoCeremonia(req, res) {
     transaccion = true;
     const ceremonia = await obtenerCeremonia(client, req.params.id, true);
     if (!ceremonia) throw errorHttp(404, 'La ceremonia no existe.');
+    if (estado === 'En curso' && ceremonia.estado !== 'En curso') {
+      const requisitos = await consultarRequisitosInicioCeremonia(client, req.params.id);
+      if (!requisitos.puedeIniciar) {
+        throw errorHttp(409, `No se puede iniciar la ceremonia. ${requisitos.pendientes.join(' ')}`);
+      }
+    }
     await client.query(
       `UPDATE public.ceremonia_grado
        SET estado = $2
@@ -535,15 +588,11 @@ export async function actualizarEstadoCeremonia(req, res) {
     );
     let sesionesIniciadas = [];
     let sesionesFinalizadas = 0;
+    let sesionesFinalizadasPorHorario = [];
     if (estado === 'En curso') {
-      const resultado = await client.query(
-        `UPDATE public.sesion
-         SET estado = 'En curso'
-         WHERE id_ceremonia = $1 AND estado = 'Programada'
-         RETURNING id_sesion::text AS id`,
-        [req.params.id],
-      );
-      sesionesIniciadas = resultado.rows.map((sesion) => sesion.id);
+      const resultado = await actualizarSesionesPorHorario(client, req.params.id);
+      sesionesIniciadas = resultado.rows.filter((sesion) => sesion.estado === 'En curso').map((sesion) => sesion.id);
+      sesionesFinalizadasPorHorario = resultado.rows.filter((sesion) => sesion.estado === 'Finalizada').map((sesion) => sesion.id);
     }
     if (estado === 'Finalizada') {
       const resultado = await client.query(
@@ -553,10 +602,11 @@ export async function actualizarEstadoCeremonia(req, res) {
         [req.params.id],
       );
       sesionesFinalizadas = resultado.rowCount;
+      await prepararSincronizacionGrados(client, req.params.id);
     }
     await client.query('COMMIT');
     transaccion = false;
-    return res.json({ id: req.params.id, estado, sesionesIniciadas, sesionesFinalizadas });
+    return res.json({ id: req.params.id, estado, sesionesIniciadas, sesionesFinalizadas, sesionesFinalizadasPorHorario });
   } catch (error) {
     if (transaccion) await client.query('ROLLBACK');
     return responderError(res, error, 'No fue posible cambiar el estado de la ceremonia.');
@@ -1035,9 +1085,8 @@ export async function listarInvitadosCeremonia(req, res) {
 }
 
 function validarDatosInvitado(body) {
-  const autorizacion = body.autorizacion ?? 'Autorizado';
-  if (!ESTADOS_AUTORIZACION.has(autorizacion)) {
-    throw errorHttp(400, 'El estado de autorización del invitado no es válido.');
+  if (body.autorizacion !== undefined && body.autorizacion !== 'Autorizado') {
+    throw errorHttp(400, 'La autorización de invitados se asigna automáticamente y no se puede seleccionar.');
   }
   const documento = texto(body.documento, 40, 'El documento');
   if (documento && !/^\d+$/.test(documento)) {
@@ -1048,7 +1097,6 @@ function validarDatosInvitado(body) {
     documento,
     telefono: texto(body.telefono, 40, 'El teléfono'),
     parentesco: texto(body.parentesco ?? body.tipo, 80, 'El parentesco o tipo'),
-    autorizacion,
   };
 }
 
@@ -1073,11 +1121,11 @@ async function crearInvitado(client, ceremoniaId, graduandoId, datos) {
     `INSERT INTO public.invitado (
        id_graduando, nombre, identificacion, telefono, parentesco, autorizado
      )
-     VALUES ($1, $2, NULLIF($3, ''), NULLIF($4, ''), NULLIF($5, ''), $6)
+     VALUES ($1, $2, NULLIF($3, ''), NULLIF($4, ''), NULLIF($5, ''), TRUE)
      RETURNING id_invitado::text AS id`,
     [
       graduandoId, datos.nombre, datos.documento, datos.telefono,
-      datos.parentesco, datos.autorizacion === 'Autorizado',
+      datos.parentesco,
     ],
   );
   return resultado.rows[0].id;
@@ -1182,6 +1230,9 @@ export async function agregarInvitadosLote(req, res) {
 export async function actualizarInvitado(req, res) {
   try {
     validarId(req.params.id, 'invitado');
+    if (req.body?.autorizacion !== undefined) {
+      throw errorHttp(400, 'La autorización de invitados se asigna automáticamente y no se puede modificar.');
+    }
     const datos = validarDatosInvitado(req.body ?? {});
     if (datos.documento) {
       const duplicado = await pool.query(
@@ -1205,11 +1256,11 @@ export async function actualizarInvitado(req, res) {
     const resultado = await pool.query(
       `UPDATE public.invitado
        SET nombre = $2, identificacion = NULLIF($3, ''), telefono = NULLIF($4, ''),
-           parentesco = NULLIF($5, ''), autorizado = $6
+           parentesco = NULLIF($5, '')
        WHERE id_invitado = $1`,
       [
         req.params.id, datos.nombre, datos.documento, datos.telefono,
-        datos.parentesco, datos.autorizacion === 'Autorizado',
+        datos.parentesco,
       ],
     );
     if (resultado.rowCount === 0) return res.status(404).json({ mensaje: 'El invitado no existe.' });

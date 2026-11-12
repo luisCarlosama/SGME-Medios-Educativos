@@ -12,11 +12,11 @@ import {
 import CloseIcon from '@mui/icons-material/Close';
 import AddIcon from '@mui/icons-material/Add';
 import CloudUploadIcon from '@mui/icons-material/CloudUpload';
-import type { Ceremonia, Sesion } from './interfaces/ceremonias.interface';
+import type { Ceremonia, RequisitosInicioCeremonia, Sesion } from './interfaces/ceremonias.interface';
 import {
-  cambiarEstadoCeremonia, getCeremoniaById, getFotografiasCeremonia,
+  cambiarEstadoCeremonia, eliminarFotografiaCeremonia, getCeremoniaById, getFotografiasCeremonia,
   updateMaxInvitadosPorGraduando,
-  getSesiones, addSesion, guardarFotografiasCeremonia, HORA_OPTIONS, formatearHora12,
+  getSesiones, getRequisitosInicioCeremonia, addSesion, guardarFotografiasCeremonia, HORA_OPTIONS, formatearHora12,
 } from './services/ceremonias.service';
 
 interface FotoItem {
@@ -24,6 +24,11 @@ interface FotoItem {
   url: string;
   name?: string;
   file?: File;
+}
+
+interface FotoAlmacenada extends FotoItem {
+  slot: number;
+  version: string;
 }
 
 const ACCEPT_IMAGES = 'image/png,image/jpeg,image/jpg,image/webp,image/gif';
@@ -81,15 +86,21 @@ export default function DetalleCeremonia() {
   const [configuracionInvitadosSuccess, setConfiguracionInvitadosSuccess] = useState('');
   const [savingEstadoCeremonia, setSavingEstadoCeremonia] = useState(false);
   const [estadoCeremoniaError, setEstadoCeremoniaError] = useState('');
+  const [actualizacionSesionesError, setActualizacionSesionesError] = useState('');
+  const [requisitosInicio, setRequisitosInicio] = useState<RequisitosInicioCeremonia | null>(null);
+  const [requisitosInicioError, setRequisitosInicioError] = useState('');
+  const consultaRequisitosRef = useRef(0);
 
   /* Registro fotográfico */
   const [fotosCeremonia, setFotosCeremonia] = useState<{
     id: string;
-    items: FotoItem[];
+    items: FotoAlmacenada[];
   } | null>(null);
   const [fotosCargadasId, setFotosCargadasId] = useState<string | null>(null);
   const [fotoErrorActual, setFotoErrorActual] = useState<{ id: string; mensaje: string } | null>(null);
   const [savingFotos, setSavingFotos] = useState(false);
+  const [eliminandoFoto, setEliminandoFoto] = useState(false);
+  const [fotoAEliminar, setFotoAEliminar] = useState<{ ceremoniaId: string; foto: FotoAlmacenada } | null>(null);
   const [uploadOpen, setUploadOpen] = useState(false);
   const [pendingFotos, setPendingFotos] = useState<FotoItem[]>([]);
   const [dragOver, setDragOver] = useState(false);
@@ -125,6 +136,54 @@ export default function DetalleCeremonia() {
 
   useEffect(() => { load(); }, [load]);
 
+  useEffect(() => {
+    if (!id || savingEstadoCeremonia) return;
+    let activa = true;
+    let consultando = false;
+    const intervalo = window.setInterval(async () => {
+      if (consultando) return;
+      consultando = true;
+      try {
+        const actuales = await getSesiones(id);
+        if (!activa) return;
+        const estados = new Map(actuales.map((sesion) => [sesion.id, sesion]));
+        setSesiones((anteriores) => anteriores.map((sesion) => {
+          const actual = estados.get(sesion.id);
+          return actual ? { ...sesion, estado: actual.estado, estadoManual: actual.estadoManual } : sesion;
+        }));
+        setActualizacionSesionesError('');
+      } catch {
+        if (activa) setActualizacionSesionesError('No fue posible actualizar los estados de las sesiones. Se volverá a intentar.');
+      } finally {
+        consultando = false;
+      }
+    }, 15_000);
+    return () => {
+      activa = false;
+      window.clearInterval(intervalo);
+    };
+  }, [id, savingEstadoCeremonia]);
+
+  const cargarRequisitosInicio = useCallback(async () => {
+    if (!id) return;
+    const consulta = ++consultaRequisitosRef.current;
+    setRequisitosInicio(null);
+    setRequisitosInicioError('');
+    try {
+      const resultado = await getRequisitosInicioCeremonia(id);
+      if (consulta === consultaRequisitosRef.current) setRequisitosInicio(resultado);
+    } catch (cause) {
+      if (consulta === consultaRequisitosRef.current) {
+        setRequisitosInicioError(cause instanceof Error ? cause.message : 'No fue posible consultar los requisitos para iniciar.');
+      }
+    }
+  }, [id]);
+
+  useEffect(() => {
+    void cargarRequisitosInicio();
+    return () => { consultaRequisitosRef.current += 1; };
+  }, [cargarRequisitosInicio]);
+
   const handleAvanzarEstadoCeremonia = async () => {
     if (!id || !ceremonia || savingEstadoCeremonia) return;
     const siguienteEstado = ceremonia.estado === 'Programada'
@@ -141,11 +200,12 @@ export default function DetalleCeremonia() {
       setCeremonia((actual) => actual ? { ...actual, estado: resultado.estado } : actual);
       if (resultado.estado === 'En curso') {
         const sesionesIniciadas = new Set(resultado.sesionesIniciadas);
-        setSesiones((actuales) => actuales.map((sesion) => (
-          sesionesIniciadas.has(sesion.id)
-            ? { ...sesion, estado: 'En curso' }
-            : sesion
-        )));
+        const sesionesFinalizadas = new Set(resultado.sesionesFinalizadasPorHorario);
+        setSesiones((actuales) => actuales.map((sesion) => {
+          if (sesionesIniciadas.has(sesion.id)) return { ...sesion, estado: 'En curso' };
+          if (sesionesFinalizadas.has(sesion.id)) return { ...sesion, estado: 'Finalizada' };
+          return sesion;
+        }));
       } else if (resultado.estado === 'Finalizada') {
         setSesiones((actuales) => actuales.map((sesion) => ({
           ...sesion,
@@ -156,6 +216,7 @@ export default function DetalleCeremonia() {
       setEstadoCeremoniaError(
         cause instanceof Error ? cause.message : 'No fue posible cambiar el estado de la ceremonia.'
       );
+      if (siguienteEstado === 'En curso') void cargarRequisitosInicio();
     } finally {
       setSavingEstadoCeremonia(false);
     }
@@ -194,6 +255,8 @@ export default function DetalleCeremonia() {
           id,
           items: resultado.map((foto) => ({
             id: String(foto.slot),
+            slot: foto.slot,
+            version: foto.version,
             url: `data:${foto.mimeType};base64,${foto.base64}`,
             name: `Fotografía ${foto.slot}`,
           })),
@@ -229,6 +292,7 @@ export default function DetalleCeremonia() {
       setSesiones((actuales) =>
         [...actuales, nuevaSesion].sort((a, b) => a.numeroSesion - b.numeroSesion)
       );
+      void cargarRequisitosInicio();
       setModalOpen(false);
       setSesionNombre('');
       setHoraInicio('');
@@ -300,14 +364,20 @@ export default function DetalleCeremonia() {
           base64: await convertirArchivoABase64(foto.file),
         };
       }));
-      await guardarFotografiasCeremonia(id, fotosParaGuardar);
+      const resultado = await guardarFotografiasCeremonia(id, fotosParaGuardar);
       setFotosCeremonia((actuales) => ({
         id,
         items: [
           ...(actuales?.id === id ? actuales.items : []),
-          ...pendingFotos.map((foto) => ({ id: foto.id, url: foto.url, name: foto.name })),
+          ...resultado.fotografias.map((foto, indice) => ({
+            ...foto,
+            id: String(foto.slot),
+            url: `data:${fotosParaGuardar[indice].mimeType};base64,${fotosParaGuardar[indice].base64}`,
+            name: `Fotografía ${foto.slot}`,
+          })),
         ],
       }));
+      pendingFotos.forEach((foto) => URL.revokeObjectURL(foto.url));
       setPendingFotos([]);
       setUploadOpen(false);
     } catch (cause) {
@@ -336,22 +406,22 @@ export default function DetalleCeremonia() {
     });
   };
 
-  const renderFotoThumb = (foto: FotoItem, size = { w: 100, h: 70 }) => {
-    return (
-      <Box
-        key={foto.id}
-        component="img"
-        src={foto.url}
-        alt={foto.name || 'Foto'}
-        sx={{
-          width: size.w,
-          height: size.h,
-          borderRadius: '8px',
-          objectFit: 'cover',
-          flexShrink: 0,
-        }}
-      />
-    );
+  const handleEliminarFoto = async () => {
+    if (!id || !fotoAEliminar || fotoAEliminar.ceremoniaId !== id || eliminandoFoto) return;
+    setEliminandoFoto(true);
+    setFotoError('');
+    try {
+      await eliminarFotografiaCeremonia(id, fotoAEliminar.foto);
+      setFotosCeremonia((actuales) => actuales?.id === id
+        ? { ...actuales, items: actuales.items.filter((foto) => foto.slot !== fotoAEliminar.foto.slot) }
+        : actuales);
+      setFotoAEliminar(null);
+    } catch (cause) {
+      setFotoError(cause instanceof Error ? cause.message : 'No fue posible eliminar la fotografía.');
+      setFotoAEliminar(null);
+    } finally {
+      setEliminandoFoto(false);
+    }
   };
 
   if (loading) {
@@ -409,6 +479,7 @@ export default function DetalleCeremonia() {
           </Typography>
           <Typography sx={{ color: 'rgba(255,255,255,0.8)', fontSize: '0.85rem' }}>
             Fecha: {ceremonia.fecha || '—'} · Lugar: {ceremonia.lugar || '—'}
+            {ceremonia.periodoGrado && ` · Periodo: ${ceremonia.periodoGrado}`}
           </Typography>
         </Box>
         <Chip label={ceremonia.estado} size="small" sx={{
@@ -498,6 +569,7 @@ export default function DetalleCeremonia() {
         </Button>
       </Box>
 
+      {actualizacionSesionesError && <Alert severity="warning" sx={{ mb: 2 }}>{actualizacionSesionesError}</Alert>}
       <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '1fr 1fr' }, gap: 2, mb: 3 }}>
         <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
           {sesiones.map((s) => (
@@ -509,6 +581,7 @@ export default function DetalleCeremonia() {
                       Sesión {s.numeroSesion}
                     </Typography>
                     <Chip label={s.estado} size="small" sx={{ backgroundColor: '#FFF4E5', color: '#B76E00', fontWeight: 600, fontSize: '0.7rem', height: 22 }} />
+                    {s.estadoManual && <Chip label="Manual" size="small" />}
                   </Box>
                   {s.nombre.trim() !== `Sesión ${s.numeroSesion}` && !/^\d+$/.test(s.nombre.trim()) && (
                     <Typography sx={{ color: '#5A6A7A', fontSize: '0.85rem', mb: 0.5 }}>
@@ -605,7 +678,29 @@ export default function DetalleCeremonia() {
           {/* Miniaturas guardadas + botón agregar */}
           {!uploadOpen && (
             <Box sx={{ display: 'flex', gap: 1.25, flexWrap: 'wrap', alignItems: 'center' }}>
-              {fotos.map((f) => renderFotoThumb(f))}
+              {fotos.map((foto) => (
+                <Box key={foto.id} sx={{ position: 'relative', flexShrink: 0 }}>
+                  <Box
+                    component="img"
+                    src={foto.url}
+                    alt={foto.name || 'Fotografía'}
+                    sx={{ width: 100, height: 70, borderRadius: '8px', objectFit: 'cover', display: 'block' }}
+                  />
+                  <IconButton
+                    size="small"
+                    aria-label={`Eliminar ${foto.name || 'fotografía'}`}
+                    onClick={() => { if (id) setFotoAEliminar({ ceremoniaId: id, foto }); }}
+                    disabled={eliminandoFoto}
+                    sx={{
+                      position: 'absolute', top: -8, right: -8, backgroundColor: '#FFFFFF',
+                      boxShadow: '0 1px 4px rgba(0,0,0,0.2)', width: 26, height: 26,
+                      color: '#B42318', '&:hover': { backgroundColor: '#FFEBEE' },
+                    }}
+                  >
+                    <CloseIcon sx={{ fontSize: 18 }} />
+                  </IconButton>
+                </Box>
+              ))}
               <Box
                 onClick={() => setUploadOpen(true)}
                 sx={{
@@ -804,6 +899,23 @@ export default function DetalleCeremonia() {
         </CardContent>
       </Card>
 
+      <Dialog
+        open={Boolean(fotoAEliminar && fotoAEliminar.ceremoniaId === id)}
+        onClose={() => { if (!eliminandoFoto) setFotoAEliminar(null); }}
+        aria-labelledby="eliminar-fotografia-titulo"
+      >
+        <DialogTitle id="eliminar-fotografia-titulo">Eliminar fotografía</DialogTitle>
+        <DialogContent>
+          <Typography>¿Deseas eliminar esta fotografía de la ceremonia? Esta acción no se puede deshacer.</Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setFotoAEliminar(null)} disabled={eliminandoFoto}>Cancelar</Button>
+          <Button color="error" onClick={handleEliminarFoto} disabled={eliminandoFoto}>
+            {eliminandoFoto ? 'Eliminando...' : 'Eliminar'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
       {/* Acciones inferiores */}
       {[
         { label: 'Graduandos', desc: 'Gestionar listado', path: `/admin/eventos/ceremonias/${id}/graduandos`, color: '#E30613' },
@@ -850,10 +962,40 @@ export default function DetalleCeremonia() {
               {estadoCeremoniaError}
             </Typography>
           )}
+          {ceremonia.estado === 'Programada' && (
+            <>
+              {!requisitosInicio && !requisitosInicioError && (
+                <Typography sx={{ color: '#5A6A7A', fontSize: '0.85rem', mt: 1 }}>
+                  Comprobando los requisitos para iniciar...
+                </Typography>
+              )}
+              {requisitosInicioError && (
+                <Box>
+                  <Typography role="alert" sx={{ color: '#B42318', fontSize: '0.85rem', mt: 1 }}>
+                    {requisitosInicioError}
+                  </Typography>
+                  <Button onClick={() => void cargarRequisitosInicio()} sx={{ textTransform: 'none' }}>
+                    Reintentar consulta
+                  </Button>
+                </Box>
+              )}
+              {requisitosInicio?.pendientes.map((pendiente) => (
+                <Typography key={pendiente} sx={{ color: '#9A5B00', fontSize: '0.85rem', mt: 0.5 }}>
+                  {pendiente}
+                </Typography>
+              ))}
+              {requisitosInicio && !requisitosInicio.puedeIniciar && (
+                <Button onClick={() => void cargarRequisitosInicio()} sx={{ textTransform: 'none' }}>
+                  Actualizar requisitos
+                </Button>
+              )}
+            </>
+          )}
         </Box>
         <Button
           variant="contained"
-          disabled={savingEstadoCeremonia || !['Programada', 'En curso'].includes(ceremonia.estado)}
+          disabled={savingEstadoCeremonia || !['Programada', 'En curso'].includes(ceremonia.estado)
+            || (ceremonia.estado === 'Programada' && !requisitosInicio?.puedeIniciar)}
           onClick={() => void handleAvanzarEstadoCeremonia()}
           sx={{
             backgroundColor: '#E30613', textTransform: 'none', fontWeight: 600, borderRadius: '8px', boxShadow: 'none',

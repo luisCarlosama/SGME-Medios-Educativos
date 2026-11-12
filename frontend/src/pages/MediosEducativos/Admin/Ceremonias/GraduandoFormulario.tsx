@@ -216,8 +216,9 @@ export default function GraduandoFormulario() {
                 sx={{ '& .MuiOutlinedInput-root': { borderRadius: '8px' } }} />
             </Box>
             <Box>
-              <Typography sx={{ fontSize: '0.85rem', color: '#1A2A3A', mb: 0.5 }}>Estado</Typography>
-              <TextField select fullWidth size="small" label="Estado" value={estado}
+              <Typography id="estado-graduando-label" sx={{ fontSize: '0.85rem', color: '#1A2A3A', mb: 0.5 }}>Estado</Typography>
+              <TextField select fullWidth size="small" value={estado}
+                slotProps={{ select: { 'aria-labelledby': 'estado-graduando-label' } }}
                 onChange={(e) => setEstado(e.target.value)}
                 sx={{ '& .MuiOutlinedInput-root': { borderRadius: '8px' } }}>
                 <MenuItem value="true">Activo</MenuItem>

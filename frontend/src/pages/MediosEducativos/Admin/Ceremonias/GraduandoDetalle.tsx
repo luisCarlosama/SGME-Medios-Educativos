@@ -60,7 +60,6 @@ export default function GraduandoDetalle({ modoGraduando = false }: GraduandoDet
   const [formSesion, setFormSesion] = useState('');
   const [invNombre, setInvNombre] = useState('');
   const [invDoc, setInvDoc] = useState('');
-  const [invEstado, setInvEstado] = useState('Autorizado');
 
   const load = useCallback(async () => {
     if (!modoGraduando && (!graduandoId || !id)) return;
@@ -160,7 +159,6 @@ export default function GraduandoDetalle({ modoGraduando = false }: GraduandoDet
     setSelectedInv(inv);
     setInvNombre(inv.nombre);
     setInvDoc(inv.documento);
-    setInvEstado(inv.autorizacion);
     setInvError('');
     setEditInvOpen(true);
   };
@@ -178,7 +176,6 @@ export default function GraduandoDetalle({ modoGraduando = false }: GraduandoDet
         const input = {
           nombre: invNombre,
           documento: invDoc,
-          autorizacion: invEstado as 'Autorizado' | 'Pendiente',
         };
         invitadoGuardado = selectedInv
           ? await updateMiInvitado(selectedInv.id, input)
@@ -187,14 +184,12 @@ export default function GraduandoDetalle({ modoGraduando = false }: GraduandoDet
         invitadoGuardado = await updateInvitado(selectedInv.id, {
           nombre: invNombre,
           documento: invDoc,
-          autorizacion: invEstado as 'Autorizado' | 'Pendiente',
         });
       } else if (graduandoId) {
         invitadoGuardado = await addInvitado({
           graduandoId,
           nombre: invNombre,
           documento: invDoc,
-          autorizacion: invEstado as 'Autorizado' | 'Pendiente',
         });
       }
       if (!invitadoGuardado) {
@@ -223,8 +218,8 @@ export default function GraduandoDetalle({ modoGraduando = false }: GraduandoDet
     );
   }
 
-  const autorizados = invitados.filter((i) => i.autorizacion === 'Autorizado').length;
-  const pendientes = invitados.filter((i) => i.autorizacion === 'Pendiente').length;
+  const ingresos = invitados.filter((i) => i.estadoIngreso === 'Ingresó').length;
+  const registrosSinAutorizacion = invitados.filter((i) => i.autorizacion !== 'Autorizado').length;
 
   return (
     <>
@@ -346,8 +341,7 @@ export default function GraduandoDetalle({ modoGraduando = false }: GraduandoDet
       }}>
         <Typography sx={{ fontWeight: 700, fontSize: '1.25rem', color: '#0B1A2A' }}>{invitados.length}</Typography>
         <Typography sx={{ color: '#5A6A7A', fontSize: '0.85rem' }}>Invitados registrados</Typography>
-        <Chip label={`${autorizados} Autorizados`} size="small" sx={{ backgroundColor: '#E6F4EA', color: '#1B7A3D', fontWeight: 600 }} />
-        <Chip label={`${pendientes} Pendiente`} size="small" sx={{ backgroundColor: '#FFF4E5', color: '#B76E00', fontWeight: 600 }} />
+        <Chip label={`${ingresos} Ingresaron`} size="small" sx={{ backgroundColor: '#E6F4EA', color: '#1B7A3D', fontWeight: 600 }} />
         <Typography sx={{ color: '#5A6A7A', fontSize: '0.85rem', ml: 'auto' }}>
           Invitados asociados al registro del graduando
         </Typography>
@@ -358,11 +352,11 @@ export default function GraduandoDetalle({ modoGraduando = false }: GraduandoDet
         <Box>
           <Typography sx={{ fontWeight: 700, fontSize: '1.05rem', color: '#0B1A2A' }}>Relación de invitados</Typography>
           <Typography sx={{ color: '#5A6A7A', fontSize: '0.85rem' }}>
-            Gestiona la validación de los invitados sin confundirla con el registro de ingreso.
+            Los invitados registrados quedan autorizados automáticamente.
           </Typography>
         </Box>
         <Button variant="contained" startIcon={<AddIcon />}
-          onClick={() => { setSelectedInv(null); setInvNombre(''); setInvDoc(''); setInvEstado('Autorizado'); setInvError(''); setAddInvOpen(true); }}
+          onClick={() => { setSelectedInv(null); setInvNombre(''); setInvDoc(''); setInvError(''); setAddInvOpen(true); }}
           sx={{
             backgroundColor: '#E30613', textTransform: 'none', fontWeight: 600, borderRadius: '8px',
             boxShadow: 'none', '&:hover': { backgroundColor: '#C10510', boxShadow: 'none' },
@@ -371,11 +365,16 @@ export default function GraduandoDetalle({ modoGraduando = false }: GraduandoDet
         </Button>
       </Box>
 
+      {registrosSinAutorizacion > 0 && (
+        <Alert severity="warning" sx={{ mb: 2 }}>
+          Hay {registrosSinAutorizacion} registro(s) antiguo(s) sin autorización que requieren revisión antes del ingreso.
+        </Alert>
+      )}
       <TableContainer sx={{ backgroundColor: '#FFFFFF', borderRadius: '12px', border: '1px solid #E5EAF0', overflow: 'hidden', mb: 2 }}>
         <Table>
           <TableHead>
             <TableRow sx={{ backgroundColor: '#FAFBFC' }}>
-              {['Invitado', 'Documento', 'Estado', 'Acción'].map((h) => (
+              {['Invitado', 'Documento', 'Ingreso', 'Acción'].map((h) => (
                 <TableCell key={h} sx={{ fontWeight: 600, color: '#1A2A3A', fontSize: '0.85rem', borderBottom: '1px solid #E5EAF0', py: 1.5 }}>
                   {h}
                 </TableCell>
@@ -388,9 +387,9 @@ export default function GraduandoDetalle({ modoGraduando = false }: GraduandoDet
                 <TableCell sx={{ fontWeight: 600, fontSize: '0.875rem' }}>{inv.nombre}</TableCell>
                 <TableCell sx={{ fontSize: '0.875rem' }}>{inv.documento}</TableCell>
                 <TableCell>
-                  <Chip label={inv.autorizacion} size="small" sx={{
-                    backgroundColor: inv.autorizacion === 'Autorizado' ? '#E6F4EA' : '#FFF4E5',
-                    color: inv.autorizacion === 'Autorizado' ? '#1B7A3D' : '#B76E00',
+                  <Chip label={inv.estadoIngreso ?? 'No disponible'} size="small" sx={{
+                    backgroundColor: inv.estadoIngreso === 'Ingresó' ? '#E6F4EA' : '#FFF4E5',
+                    color: inv.estadoIngreso === 'Ingresó' ? '#1B7A3D' : '#B76E00',
                     fontWeight: 600, fontSize: '0.75rem', height: 24,
                   }} />
                 </TableCell>
@@ -528,18 +527,9 @@ export default function GraduandoDetalle({ modoGraduando = false }: GraduandoDet
           </Typography>
           <TextField fullWidth size="small" label="Nombre" value={invNombre} onChange={(e) => setInvNombre(e.target.value)}
             sx={{ mb: 2, '& .MuiOutlinedInput-root': { borderRadius: '8px' } }} />
-          <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 2, mb: 1 }}>
-            <TextField size="small" label="Documento" value={invDoc} onChange={(e) => setInvDoc(e.target.value.replace(/\D/g, ''))}
-              sx={{ '& .MuiOutlinedInput-root': { borderRadius: '8px' } }} />
-            <TextField select size="small" label="Estado" value={invEstado} onChange={(e) => setInvEstado(e.target.value)}
-              sx={{ '& .MuiOutlinedInput-root': { borderRadius: '8px' } }}>
-              <MenuItem value="Autorizado">Autorizado</MenuItem>
-              <MenuItem value="Pendiente">Pendiente</MenuItem>
-            </TextField>
-          </Box>
-          <Typography sx={{ color: '#5A6A7A', fontSize: '0.8rem' }}>
-            El estado corresponde a la validación del invitado, no al registro de ingreso.
-          </Typography>
+          <TextField fullWidth size="small" label="Documento" value={invDoc}
+            onChange={(e) => setInvDoc(e.target.value.replace(/\D/g, ''))}
+            sx={{ '& .MuiOutlinedInput-root': { borderRadius: '8px' } }} />
         </DialogContent>
         <DialogActions sx={{ px: 3, pb: 2.5 }}>
           <Button onClick={() => { setAddInvOpen(false); setEditInvOpen(false); }} sx={{ textTransform: 'none', color: '#5A6A7A' }}>

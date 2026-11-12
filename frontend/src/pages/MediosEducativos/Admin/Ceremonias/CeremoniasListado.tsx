@@ -11,6 +11,7 @@ import {
 import AddIcon from '@mui/icons-material/Add';
 import type { Ceremonia, CeremoniaFilters } from './interfaces/ceremonias.interface';
 import { getCeremonias, ESTADO_CEREMONIA_OPTIONS } from './services/ceremonias.service';
+import AdministrarPruebasGrado from './AdministrarPruebasGrado';
 
 const estadoStyles: Record<string, { bg: string; color: string }> = {
   Programada: { bg: '#E3F2FD', color: '#1565C0' },
@@ -24,6 +25,7 @@ export default function CeremoniasListado() {
   const [items, setItems] = useState<Ceremonia[]>([]);
   const [loading, setLoading] = useState(true);
   const [filters, setFilters] = useState<CeremoniaFilters>({});
+  const [pruebasOpen, setPruebasOpen] = useState(false);
 
   const load = useCallback(async (f?: CeremoniaFilters) => {
     setLoading(true);
@@ -64,6 +66,10 @@ export default function CeremoniasListado() {
       <Typography sx={{ color: '#5A6A7A', fontSize: '0.9rem', mb: 2.5 }}>
         Cada ceremonia puede organizarse en varias sesiones y horarios según la cantidad de graduandos.
       </Typography>
+      {import.meta.env.DEV && (
+        <Button onClick={() => setPruebasOpen(true)}>Administrar procesos ficticios</Button>
+      )}
+      <AdministrarPruebasGrado open={pruebasOpen} onClose={() => setPruebasOpen(false)} />
 
       {/* Filtros */}
       <Box sx={{

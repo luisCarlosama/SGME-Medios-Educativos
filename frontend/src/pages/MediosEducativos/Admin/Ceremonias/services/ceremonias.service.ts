@@ -17,6 +17,7 @@ import type {
   ResultadoRegistroIngreso,
   EstadoCeremonia,
   EstadoSesionConfiguracion,
+  RequisitosInicioCeremonia,
 } from '../interfaces/ceremonias.interface';
 import type {
   ImportGraduandoRow,
@@ -77,7 +78,7 @@ export async function getFotografiasCeremonia(id: string): Promise<FotoCeremonia
 export async function guardarFotografiasCeremonia(
   id: string,
   fotos: Pick<FotoCeremonia, 'mimeType' | 'base64'>[],
-): Promise<{ guardadas: number; espaciosDisponibles: number }> {
+): Promise<{ guardadas: number; espaciosDisponibles: number; fotografias: FotoGuardada[] }> {
   const respuesta = await fetchBackend(
     `/api/ceremonias/${encodeURIComponent(id)}/fotografias`,
     {
@@ -86,7 +87,15 @@ export async function guardarFotografiasCeremonia(
       body: JSON.stringify({ fotos }),
     },
   );
-  return respuestaCeremonia<{ guardadas: number; espaciosDisponibles: number }>(respuesta);
+  return respuestaCeremonia<{ guardadas: number; espaciosDisponibles: number; fotografias: FotoGuardada[] }>(respuesta);
+}
+
+export async function eliminarFotografiaCeremonia(id: string, foto: FotoGuardada): Promise<void> {
+  const respuesta = await fetchBackend(
+    `/api/ceremonias/${encodeURIComponent(id)}/fotografias/${foto.slot}`,
+    { method: 'DELETE', headers: { 'If-Match': `"${foto.version}"` } },
+  );
+  await respuestaCeremonia<{ mensaje: string }>(respuesta);
 }
 
 export interface EventoOption {
@@ -105,8 +114,12 @@ export interface CampusOption {
   nombre: string;
 }
 
-export interface FotoCeremonia {
+export interface FotoGuardada {
   slot: number;
+  version: string;
+}
+
+export interface FotoCeremonia extends FotoGuardada {
   mimeType: string;
   base64: string;
 }
@@ -121,6 +134,24 @@ export interface GraduandoRegistroPublico {
   programa: string;
   maxInvitadosPorGraduando: number;
   invitadosRegistrados: number;
+}
+
+export interface GraduandoInstitucional {
+  nombre: string | null;
+  documento: string | null;
+  programa: string | null;
+  codigo: string | null;
+  estado: string | null;
+  periodo: string | null;
+}
+
+export async function getGraduandosInstitucionales(pagina: number): Promise<{
+  data: GraduandoInstitucional[];
+  pagina: number;
+  haySiguiente: boolean;
+}> {
+  const respuesta = await fetchBackend(`/api/ceremonias/graduandos-institucionales?pagina=${pagina}`);
+  return respuestaCeremonia(respuesta);
 }
 
 export async function iniciarSesionGraduando(
@@ -214,6 +245,7 @@ export async function cambiarEstadoCeremonia(
   estado: EstadoCeremonia;
   sesionesIniciadas: string[];
   sesionesFinalizadas: number;
+  sesionesFinalizadasPorHorario: string[];
 }> {
   const respuesta = await fetchBackend(
     `/api/ceremonias/${encodeURIComponent(ceremoniaId)}/estado`,
@@ -228,6 +260,7 @@ export async function cambiarEstadoCeremonia(
     estado: EstadoCeremonia;
     sesionesIniciadas: string[];
     sesionesFinalizadas: number;
+    sesionesFinalizadasPorHorario: string[];
   }>(respuesta);
 }
 
@@ -236,6 +269,13 @@ export async function getSesiones(ceremoniaId: string): Promise<Sesion[]> {
     `/api/ceremonias/${encodeURIComponent(ceremoniaId)}/sesiones`
   );
   return respuestaCeremonia<Sesion[]>(respuesta);
+}
+
+export async function getRequisitosInicioCeremonia(ceremoniaId: string): Promise<RequisitosInicioCeremonia> {
+  const respuesta = await fetchBackend(
+    `/api/ceremonias/${encodeURIComponent(ceremoniaId)}/requisitos-inicio`
+  );
+  return respuestaCeremonia<RequisitosInicioCeremonia>(respuesta);
 }
 
 export async function getSesionById(id: string): Promise<Sesion | null> {
@@ -263,6 +303,7 @@ export async function updateSesion(
   id: string,
   payload: Pick<Sesion, 'nombre' | 'horaInicio' | 'horaFin' | 'programas'> & {
     estado: EstadoSesionConfiguracion;
+    estadoManual: boolean;
   }
 ): Promise<Sesion & { graduandosAsignados: number }> {
   const respuesta = await fetchBackend(`/api/ceremonias/sesiones/${encodeURIComponent(id)}`, {
@@ -443,7 +484,7 @@ export async function getInvitadosControlIngreso(
 
 export async function updateInvitado(
   id: string,
-  payload: Partial<Invitado>
+  payload: Partial<Omit<Invitado, 'autorizacion'>>
 ): Promise<Invitado | null> {
   const respuesta = await fetchBackend(`/api/ceremonias/invitados/${encodeURIComponent(id)}`, {
     method: 'PATCH',
@@ -455,7 +496,7 @@ export async function updateInvitado(
 }
 
 export type NuevoInvitadoPayload =
-  Pick<Invitado, 'nombre' | 'documento' | 'autorizacion'> &
+  Pick<Invitado, 'nombre' | 'documento'> &
   Partial<Pick<Invitado, 'tipo' | 'telefono' | 'parentesco'>>;
 
 export async function addInvitado(
@@ -469,7 +510,6 @@ export async function addInvitado(
       body: JSON.stringify({
         nombre: payload.nombre,
         documento: payload.documento,
-        autorizacion: payload.autorizacion,
         telefono: payload.telefono,
         parentesco: payload.parentesco || payload.tipo,
       }),
@@ -491,7 +531,6 @@ export async function addInvitados(
         invitados: invitados.map((invitado) => ({
           nombre: invitado.nombre,
           documento: invitado.documento,
-          autorizacion: invitado.autorizacion,
           telefono: invitado.telefono,
           parentesco: invitado.parentesco || invitado.tipo,
         })),

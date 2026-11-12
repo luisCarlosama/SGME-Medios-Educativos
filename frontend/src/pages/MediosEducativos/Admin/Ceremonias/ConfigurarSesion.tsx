@@ -17,6 +17,8 @@ import {
   CircularProgress,
   IconButton,
   Alert,
+  FormControlLabel,
+  Switch,
 } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
 import CloseIcon from '@mui/icons-material/Close';
@@ -28,6 +30,7 @@ import type {
 import {
   getCeremoniaById,
   getSesionById,
+  getSesiones,
   getProgramasActivos,
   updateSesion,
   HORA_OPTIONS,
@@ -42,11 +45,13 @@ export default function ConfigurarSesion() {
   const [loading, setLoading] = useState(true);
   const [nombre, setNombre] = useState('');
   const [estado, setEstado] = useState<EstadoSesionConfiguracion>('Programada');
+  const [estadoManual, setEstadoManual] = useState(false);
   const [horaInicio, setHoraInicio] = useState('');
   const [horaFin, setHoraFin] = useState('');
   /** Programas ya asociados a la sesión */
   const [programas, setProgramas] = useState<string[]>([]);
   const [programasActivos, setProgramasActivos] = useState<string[]>([]);
+  const [otrasSesiones, setOtrasSesiones] = useState<Sesion[]>([]);
   /** Selección temporal del dropdown antes de agregar */
   const [programaSeleccionado, setProgramaSeleccionado] = useState('');
   const [saving, setSaving] = useState(false);
@@ -54,14 +59,16 @@ export default function ConfigurarSesion() {
 
   useEffect(() => {
     if (!id || !sesionId) return;
-    Promise.all([getCeremoniaById(id), getSesionById(sesionId), getProgramasActivos()])
-      .then(([c, s, p]) => {
+    Promise.all([getCeremoniaById(id), getSesionById(sesionId), getProgramasActivos(), getSesiones(id)])
+      .then(([c, s, p, sesiones]) => {
         setCeremonia(c);
         setSesion(s);
         setProgramasActivos(p);
+        setOtrasSesiones(sesiones.filter((otra) => otra.id !== sesionId));
         if (s) {
           setNombre(s.nombre);
           setEstado(s.estado === 'Pendiente' ? 'Programada' : s.estado);
+          setEstadoManual(s.estadoManual);
           setHoraInicio(s.horaInicio || '');
           setHoraFin(s.horaFin || '');
           if (s.programas?.length) {
@@ -78,6 +85,9 @@ export default function ConfigurarSesion() {
   const programasDisponibles = programasActivos.filter(
     (p) => !programas.includes(p)
   );
+  const sesionDePrograma = (programa: string) =>
+    otrasSesiones.find((otra) => otra.programas.includes(programa));
+  const programasDuplicados = programas.filter((programa) => sesionDePrograma(programa));
 
   const handleAgregarPrograma = () => {
     if (!programaSeleccionado) return;
@@ -100,6 +110,10 @@ export default function ConfigurarSesion() {
       setError('Configura una hora de inicio y finalización válidas.');
       return;
     }
+    if (programasDuplicados.length > 0) {
+      setError('Quita los programas que ya están asignados a otra sesión de esta ceremonia.');
+      return;
+    }
 
     setSaving(true);
     setError('');
@@ -107,6 +121,7 @@ export default function ConfigurarSesion() {
       const resultado = await updateSesion(sesionId, {
         nombre: nombre.trim(),
         estado,
+        estadoManual,
         horaInicio,
         horaFin,
         programas,
@@ -238,6 +253,7 @@ export default function ConfigurarSesion() {
                 size="small"
                 label="Estado"
                 value={estado}
+                disabled={!estadoManual}
                 onChange={(e) => setEstado(e.target.value as EstadoSesionConfiguracion)}
                 sx={{ '& .MuiOutlinedInput-root': { borderRadius: '8px' } }}
               >
@@ -246,6 +262,15 @@ export default function ConfigurarSesion() {
                 <MenuItem value="Finalizada">Finalizada</MenuItem>
               </TextField>
             </Box>
+            <FormControlLabel
+              control={<Switch checked={estadoManual} onChange={(e) => setEstadoManual(e.target.checked)} />}
+              label="Cambiar estado manualmente"
+            />
+            <Typography sx={{ color: '#5A6A7A', fontSize: '0.8rem', mb: 2 }}>
+              {estadoManual
+                ? 'El estado elegido se conservará hasta que vuelvas al modo automático o lo cambies manualmente.'
+                : 'Al guardar, el estado seguirá el horario mientras la ceremonia esté en curso.'}
+            </Typography>
             <Box
               sx={{
                 display: 'grid',
@@ -303,8 +328,15 @@ export default function ConfigurarSesion() {
               sx={{ color: '#5A6A7A', fontSize: '0.85rem', mb: 1.5 }}
             >
               Selecciona los programas que participarán en esta sesión. Puedes
-              agregar más de uno.
+              agregar más de uno. Cada programa solo puede estar en una sesión
+              de esta ceremonia.
             </Typography>
+            {programasDuplicados.length > 0 && (
+              <Alert severity="warning" sx={{ mb: 1.5 }}>
+                Quita los programas que también están asignados a otra sesión:
+                {' '}{programasDuplicados.join(', ')}.
+              </Alert>
+            )}
 
             <Box
               sx={{
@@ -328,8 +360,8 @@ export default function ConfigurarSesion() {
               >
                 <MenuItem value="">Selecciona un programa académico</MenuItem>
                 {programasDisponibles.map((p) => (
-                  <MenuItem key={p} value={p}>
-                    {p}
+                  <MenuItem key={p} value={p} disabled={Boolean(sesionDePrograma(p))}>
+                    {p}{sesionDePrograma(p) ? ` — asignado a ${sesionDePrograma(p)?.nombre}` : ''}
                   </MenuItem>
                 ))}
               </TextField>

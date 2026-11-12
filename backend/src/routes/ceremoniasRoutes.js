@@ -1,8 +1,14 @@
 import { Router } from 'express';
 import {
+  agregarCandidatoPrueba, guardarEstadoCatalogo, listarCandidatosPrueba, listarCatalogoEstados,
+  listarSincronizacionesPrueba, reintentarSincronizacionesPrueba,
+} from '../controllers/procesosGradoPruebaController.js';
+import {
   crearCeremonia,
+  eliminarFotografiaCeremonia,
   guardarFotografiasCeremonia,
   listarGraduandosCeremonia,
+  listarGraduandosInstitucionales,
   listarProgramasCeremonia,
   listarCeremonias,
   listarSesionesCeremonia,
@@ -29,6 +35,7 @@ import {
   obtenerEstadisticasControlIngreso,
   obtenerGraduandoPorDocumento,
   obtenerGraduandoPorId,
+  obtenerRequisitosInicioCeremonia,
   obtenerSesionPorId,
   registrarIngresoGraduando,
   registrarIngresoInvitado,
@@ -40,6 +47,11 @@ const router = Router();
 router.get('/', listarCeremonias);
 router.post('/', crearCeremonia);
 router.get('/programas', listarProgramasCeremonia);
+router.get('/graduandos-institucionales', listarGraduandosInstitucionales);
+router.get('/prueba/catalogo-estados', listarCatalogoEstados);
+router.post('/prueba/catalogo-estados', guardarEstadoCatalogo);
+router.get('/prueba/sincronizaciones', listarSincronizacionesPrueba);
+router.post('/prueba/sincronizaciones/reintentar', reintentarSincronizacionesPrueba);
 router.post('/registro-invitados/login', iniciarSesionGraduando);
 router.get('/sesiones/:id', obtenerSesionPorId);
 router.patch('/sesiones/:id', actualizarSesion);
@@ -53,10 +65,14 @@ router.post('/invitados/:id/ingreso', registrarIngresoInvitado);
 router.patch('/:id/cupo-invitados', actualizarCupoInvitados);
 router.patch('/:id/max-invitados-por-graduando', actualizarMaxInvitadosPorGraduando);
 router.patch('/:id/estado', actualizarEstadoCeremonia);
+router.get('/:id/requisitos-inicio', obtenerRequisitosInicioCeremonia);
+router.get('/:id/prueba/candidatos', listarCandidatosPrueba);
+router.post('/:id/prueba/candidatos', agregarCandidatoPrueba);
 router.get('/:id/sesiones', listarSesionesCeremonia);
 router.post('/:id/sesiones', crearSesion);
 router.get('/:id/fotografias', obtenerFotografiasCeremonia);
 router.patch('/:id/fotografias', guardarFotografiasCeremonia);
+router.delete('/:id/fotografias/:slot', eliminarFotografiaCeremonia);
 router.get('/:id/graduandos', listarGraduandosCeremonia);
 router.post('/:id/graduandos', crearGraduando);
 router.post('/:id/graduandos/importacion/validar', validarImportacionGraduandos);

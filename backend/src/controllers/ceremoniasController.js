@@ -1,5 +1,7 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import pool from '../db.js';
+import { obtenerPoolInstitucional } from '../dbInstitucional.js';
+import { consultarGraduandosInstitucionales } from '../services/institucionalService.js';
 
 const ESTADOS_CEREMONIA = new Set([
   'Programada',
@@ -13,11 +15,16 @@ const MAX_FOTOS_CEREMONIA = 4;
 const MAX_FOTO_BYTES = 3 * 1024 * 1024;
 const TIPOS_FOTO = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif']);
 
+function versionFoto(contenido) {
+  return createHash('sha256').update(contenido).digest('hex');
+}
+
 const SELECT_CEREMONIAS = `
   SELECT
     c.id_ceremonia::text AS id,
     c.codigo_ceremonia AS codigo,
     c.nombre,
+    c.periodo_grado AS "periodoGrado",
     TO_CHAR(c.fecha, 'DD/MM/YYYY') AS fecha,
     TO_CHAR(c.fecha, 'YYYY-MM-DD') AS "fechaISO",
     e.nombre AS lugar,
@@ -45,6 +52,35 @@ const SELECT_CEREMONIAS = `
   LEFT JOIN public.sesion s
     ON s.id_ceremonia = c.id_ceremonia
 `;
+
+export async function listarGraduandosInstitucionales(req, res) {
+  const direccionesLocales = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1']);
+  if (
+    process.env.INSTITUCIONAL_PREVIEW_LOCAL !== 'true'
+    || process.env.NODE_ENV === 'production'
+    || !direccionesLocales.has(req.socket.remoteAddress)
+  ) {
+    return res.status(403).json({ mensaje: 'La consulta de prueba solo está disponible localmente.' });
+  }
+
+  const pagina = String(req.query.pagina ?? '1');
+  if (!/^[1-9]\d{0,4}$/.test(pagina)) {
+    return res.status(400).json({ mensaje: 'La página solicitada no es válida.' });
+  }
+
+  try {
+    const resultado = await consultarGraduandosInstitucionales(
+      obtenerPoolInstitucional(),
+      process.env.INSTITUCIONAL_DB_SCHEMA || 'public',
+      Number(pagina),
+    );
+    res.set('Cache-Control', 'no-store');
+    return res.json(resultado);
+  } catch (error) {
+    console.error('Error al consultar graduandos institucionales:', error.message);
+    return res.status(503).json({ mensaje: 'No fue posible consultar la base institucional de prueba.' });
+  }
+}
 
 function fechaValida(fecha) {
   if (typeof fecha !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(fecha)) {
@@ -187,6 +223,7 @@ export async function crearCeremonia(req, res) {
   const {
     nombre,
     fecha,
+    periodoGrado,
     idEspacio,
     estado = 'Programada',
     maxInvitadosPorGraduando = 2,
@@ -203,6 +240,11 @@ export async function crearCeremonia(req, res) {
 
   if (!fechaValida(fecha)) {
     return res.status(400).json({ mensaje: 'La fecha indicada no es válida.' });
+  }
+
+  const periodoNormalizado = typeof periodoGrado === 'string' ? periodoGrado.trim() : '';
+  if (!periodoNormalizado || periodoNormalizado.length > 40) {
+    return res.status(400).json({ mensaje: 'El periodo de grado es obligatorio y no puede superar 40 caracteres.' });
   }
 
   if (!Number.isInteger(espacioId) || espacioId <= 0) {
@@ -225,9 +267,9 @@ export async function crearCeremonia(req, res) {
     const insertado = await pool.query(
       `INSERT INTO public.ceremonia_grado (
          id_evento, id_espacio, codigo_ceremonia, nombre, fecha, estado,
-         max_invitados_por_graduando
+         max_invitados_por_graduando, periodo_grado, finalizar_automaticamente
        )
-       SELECT NULL, e.id_espacio, $1, $2, $3::date, 'Programada', $4
+       SELECT NULL, e.id_espacio, $1, $2, $3::date, 'Programada', $4, $6, TRUE
        FROM public.espacio e
        INNER JOIN public.campus campus ON campus.id_campus = e.id_campus
        WHERE e.id_espacio = $5
@@ -244,6 +286,7 @@ export async function crearCeremonia(req, res) {
         fecha,
         Number(maxInvitadosPorGraduando),
         espacioId,
+        periodoNormalizado,
       ]
     );
 
@@ -285,6 +328,7 @@ export async function listarSesionesCeremonia(req, res) {
          s.numero_sesion AS "numeroSesion",
          s.nombre,
          s.estado,
+         s.estado_manual AS "estadoManual",
          TO_CHAR(s.hora_inicio, 'HH24:MI') AS "horaInicio",
          TO_CHAR(s.hora_fin, 'HH24:MI') AS "horaFin",
          COALESCE(
@@ -528,7 +572,7 @@ export async function obtenerFotografiasCeremonia(req, res) {
       if (!mimeType) {
         throw new Error(`No se pudo identificar el formato de la fotografía ${slot}.`);
       }
-      fotos.push({ slot, mimeType, base64: contenido.toString('base64') });
+      fotos.push({ slot, mimeType, base64: contenido.toString('base64'), version: versionFoto(contenido) });
     }
 
     return res.json({ fotos });
@@ -600,14 +644,17 @@ export async function guardarFotografiasCeremonia(req, res) {
       });
     }
 
+    const fotografias = [];
     for (const [indice, foto] of fotosValidadas.entries()) {
       const columna = `evidencia_fotografia_${slotsDisponibles[indice]}`;
+      const contenido = Buffer.from(foto.base64, 'base64');
       await client.query(
         `UPDATE public.ceremonia_grado
          SET ${columna} = $1
          WHERE id_ceremonia = $2`,
-        [Buffer.from(foto.base64, 'base64'), id],
+        [contenido, id],
       );
+      fotografias.push({ slot: slotsDisponibles[indice], version: versionFoto(contenido) });
     }
 
     await client.query('COMMIT');
@@ -615,6 +662,7 @@ export async function guardarFotografiasCeremonia(req, res) {
     return res.json({
       guardadas: fotosValidadas.length,
       espaciosDisponibles: slotsDisponibles.length - fotosValidadas.length,
+      fotografias,
     });
   } catch (error) {
     if (transaccionIniciada) {
@@ -630,5 +678,69 @@ export async function guardarFotografiasCeremonia(req, res) {
     });
   } finally {
     client.release();
+  }
+}
+
+export async function eliminarFotografiaCeremonia(req, res) {
+  const { id, slot } = req.params;
+  if (!ID_INTEGER_REGEX.test(id) || !Number.isSafeInteger(Number(id))) {
+    return res.status(400).json({ mensaje: 'El identificador de ceremonia no es válido.' });
+  }
+  if (!/^[1-4]$/.test(slot)) {
+    return res.status(400).json({ mensaje: 'El espacio de fotografía no es válido.' });
+  }
+  const ifMatch = req.get('If-Match');
+  if (typeof ifMatch !== 'string' || !/^"[a-f0-9]{64}"$/.test(ifMatch)) {
+    return res.status(400).json({ mensaje: 'La versión de la fotografía no es válida.' });
+  }
+  const version = ifMatch.slice(1, -1);
+
+  const columna = `evidencia_fotografia_${slot}`;
+  let client;
+  let transaccionIniciada = false;
+  try {
+    client = await pool.connect();
+    await client.query('BEGIN');
+    transaccionIniciada = true;
+    const resultado = await client.query(
+      `SELECT ${columna} AS fotografia
+       FROM public.ceremonia_grado
+       WHERE id_ceremonia = $1
+       FOR UPDATE`,
+      [id],
+    );
+    if (resultado.rowCount === 0) {
+      await client.query('ROLLBACK');
+      transaccionIniciada = false;
+      return res.status(404).json({ mensaje: 'La ceremonia no existe.' });
+    }
+    const contenido = resultado.rows[0].fotografia;
+    if (!contenido || versionFoto(contenido) !== version) {
+      await client.query('ROLLBACK');
+      transaccionIniciada = false;
+      return res.status(409).json({
+        mensaje: 'La fotografía cambió o ya fue eliminada. Actualiza la página para ver las fotografías actuales.',
+      });
+    }
+
+    await client.query(
+      `UPDATE public.ceremonia_grado SET ${columna} = NULL WHERE id_ceremonia = $1`,
+      [id],
+    );
+    await client.query('COMMIT');
+    transaccionIniciada = false;
+    return res.json({ mensaje: 'Fotografía eliminada.' });
+  } catch (error) {
+    if (transaccionIniciada) {
+      try {
+        await client.query('ROLLBACK');
+      } catch (rollbackError) {
+        console.error('Error al revertir la eliminación de la fotografía:', rollbackError);
+      }
+    }
+    console.error('Error al eliminar fotografía de ceremonia:', error);
+    return res.status(500).json({ mensaje: 'No fue posible eliminar la fotografía de la ceremonia.' });
+  } finally {
+    client?.release();
   }
 }

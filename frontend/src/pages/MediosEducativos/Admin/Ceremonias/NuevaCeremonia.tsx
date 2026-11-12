@@ -5,7 +5,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
-  Box, Typography, Button, TextField, MenuItem, Card, CardContent,
+  Alert, Box, Typography, Button, TextField, MenuItem, Card, CardContent,
 } from '@mui/material';
 import {
   createCeremonia,
@@ -34,6 +34,7 @@ export default function NuevaCeremonia() {
   const navigate = useNavigate();
   const [nombre, setNombre] = useState('');
   const [fecha, setFecha] = useState('');
+  const [periodoGrado, setPeriodoGrado] = useState('');
   const [campus, setCampus] = useState<CampusOption[]>([]);
   const [idCampus, setIdCampus] = useState('');
   const [espacios, setEspacios] = useState<EspacioOption[]>([]);
@@ -105,8 +106,8 @@ export default function NuevaCeremonia() {
 
   const handleCrear = async () => {
     setError('');
-    if (!nombre.trim() || !fecha || !idCampus || !idEspacio) {
-      setError('Completa el nombre, la fecha, el campus y el auditorio.');
+    if (!nombre.trim() || !fecha || !periodoGrado.trim() || !idCampus || !idEspacio) {
+      setError('Completa el nombre, la fecha, el periodo, el campus y el auditorio.');
       return;
     }
     setSaving(true);
@@ -114,6 +115,7 @@ export default function NuevaCeremonia() {
       const c = await createCeremonia({
         nombre: nombre.trim(),
         fecha,
+        periodoGrado: periodoGrado.trim(),
         idEspacio: Number(idEspacio),
         estado: 'Programada',
         maxInvitadosPorGraduando,
@@ -142,6 +144,9 @@ export default function NuevaCeremonia() {
 
       <Card elevation={0} sx={{ borderRadius: '12px', border: '1px solid #E5EAF0', backgroundColor: '#FFFFFF', maxWidth: 800 }}>
         <CardContent sx={{ p: 3.5 }}>
+          <Alert severity="info" sx={{ mb: 2 }}>
+            La actualización de títulos en la base institucional aún no está conectada. Los procesos ficticios solo funcionan en un entorno de prueba aislado.
+          </Alert>
           <Typography sx={{ fontWeight: 700, fontSize: '0.8rem', color: '#1565C0', letterSpacing: 0.5, mb: 0.5 }}>
             INFORMACIÓN GENERAL
           </Typography>
@@ -159,6 +164,14 @@ export default function NuevaCeremonia() {
           />
 
           <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr' }, gap: 2, mb: 3 }}>
+            <Box>
+              <Typography sx={{ fontWeight: 500, fontSize: '0.875rem', color: '#1A2A3A', mb: 0.75 }}>Periodo de grado</Typography>
+              <TextField fullWidth size="small" placeholder="Ejemplo: 2026-2"
+                value={periodoGrado} onChange={(e) => setPeriodoGrado(e.target.value)}
+                slotProps={{ htmlInput: { maxLength: 40, 'aria-label': 'Periodo de grado' } }}
+                sx={{ '& .MuiOutlinedInput-root': { borderRadius: '8px' } }}
+              />
+            </Box>
             <Box>
               <Typography sx={{ fontWeight: 500, fontSize: '0.875rem', color: '#1A2A3A', mb: 0.75 }}>Fecha</Typography>
               <TextField fullWidth size="small" type="date" slotProps={{ inputLabel: { shrink: true } }}

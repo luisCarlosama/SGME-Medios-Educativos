@@ -1,11 +1,10 @@
-import type { Invitado, EstadoAutorizacion } from '../pages/MediosEducativos/Admin/Ceremonias/interfaces/ceremonias.interface';
+import type { Invitado } from '../pages/MediosEducativos/Admin/Ceremonias/interfaces/ceremonias.interface';
 import { addInvitado, getInvitados, updateInvitado } from '../pages/MediosEducativos/Admin/Ceremonias/services/ceremonias.service';
 import { getCurrentGraduando } from './graduandoAuth.service';
 
 export interface InvitadoInput {
   nombre: string;
   documento: string;
-  autorizacion: EstadoAutorizacion;
 }
 
 function requireGraduando() {
@@ -25,7 +24,6 @@ export async function addMiInvitado(input: InvitadoInput): Promise<Invitado> {
     graduandoId: graduando.id,
     nombre: input.nombre.trim(),
     documento: input.documento.trim(),
-    autorizacion: input.autorizacion,
   });
 }
 
@@ -38,7 +36,6 @@ export async function updateMiInvitado(id: string, input: InvitadoInput): Promis
   const invitadoActualizado = await updateInvitado(id, {
     nombre: input.nombre.trim(),
     documento: input.documento.trim(),
-    autorizacion: input.autorizacion,
   });
   if (!invitadoActualizado) throw new Error('No se encontró el invitado de esta cuenta.');
   return invitadoActualizado;

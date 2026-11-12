@@ -8,7 +8,7 @@ import { useParams } from 'react-router-dom';
 import {
   Alert, Box, Typography, Button, Table, TableBody, TableCell, TableContainer,
   TableHead, TableRow, Dialog, DialogTitle, DialogContent, DialogActions,
-  TextField, MenuItem, IconButton, CircularProgress,
+  TextField, IconButton, CircularProgress,
 } from '@mui/material';
 import CloseIcon from '@mui/icons-material/Close';
 import type { Invitado } from './interfaces/ceremonias.interface';
@@ -26,7 +26,6 @@ export default function Invitados() {
   const [selected, setSelected] = useState<Invitado | null>(null);
   const [nombre, setNombre] = useState('');
   const [documento, setDocumento] = useState('');
-  const [estado, setEstado] = useState('Autorizado');
 
   const load = useCallback(async () => {
     if (!id) return;
@@ -49,7 +48,6 @@ export default function Invitados() {
     setSelected(inv);
     setNombre(inv.nombre);
     setDocumento(inv.documento);
-    setEstado(inv.autorizacion);
     setError('');
     setEditOpen(true);
   };
@@ -62,7 +60,6 @@ export default function Invitados() {
       const actualizado = await updateInvitado(selected.id, {
         nombre,
         documento,
-        autorizacion: estado as 'Autorizado' | 'Pendiente',
       });
       if (!actualizado) throw new Error('No se encontró el invitado que intentas actualizar.');
       setItems((actuales) => actuales.map((invitado) =>
@@ -96,7 +93,7 @@ export default function Invitados() {
         <Table>
           <TableHead>
             <TableRow sx={{ backgroundColor: '#FAFBFC' }}>
-              {['Nombre', 'Documento', 'Graduando', 'Tipo', 'Autorización', 'Acción'].map((h) => (
+              {['Nombre', 'Documento', 'Graduando', 'Tipo', 'Ingreso', 'Acción'].map((h) => (
                 <TableCell key={h} sx={{ fontWeight: 600, color: '#1A2A3A', fontSize: '0.85rem', borderBottom: '1px solid #E5EAF0', py: 1.75 }}>
                   {h}
                 </TableCell>
@@ -122,8 +119,13 @@ export default function Invitados() {
                 <TableCell sx={{ fontSize: '0.875rem' }}>{inv.documento}</TableCell>
                 <TableCell sx={{ fontSize: '0.875rem' }}>{inv.graduandoNombre}</TableCell>
                 <TableCell sx={{ fontSize: '0.875rem' }}>Invitado</TableCell>
-                <TableCell sx={{ fontSize: '0.875rem', color: inv.autorizacion === 'Autorizado' ? '#1B7A3D' : '#B76E00' }}>
-                  {inv.autorizacion}
+                <TableCell sx={{ fontSize: '0.875rem' }}>
+                  {inv.estadoIngreso ?? 'No disponible'}
+                  {inv.autorizacion !== 'Autorizado' && (
+                    <Typography sx={{ color: '#B76E00', fontSize: '0.75rem' }}>
+                      Registro antiguo sin autorización; requiere revisión.
+                    </Typography>
+                  )}
                 </TableCell>
                 <TableCell>
                   <Button variant="text" onClick={() => openEdit(inv)}
@@ -153,18 +155,9 @@ export default function Invitados() {
           </Typography>
           <TextField fullWidth size="small" label="Nombre" value={nombre} onChange={(e) => setNombre(e.target.value)}
             sx={{ mb: 2, '& .MuiOutlinedInput-root': { borderRadius: '8px' } }} />
-          <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 2, mb: 1 }}>
-            <TextField size="small" label="Documento" value={documento} onChange={(e) => setDocumento(e.target.value.replace(/\D/g, ''))}
-              sx={{ '& .MuiOutlinedInput-root': { borderRadius: '8px' } }} />
-            <TextField select size="small" label="Estado" value={estado} onChange={(e) => setEstado(e.target.value)}
-              sx={{ '& .MuiOutlinedInput-root': { borderRadius: '8px' } }}>
-              <MenuItem value="Autorizado">Autorizado</MenuItem>
-              <MenuItem value="Pendiente">Pendiente</MenuItem>
-            </TextField>
-          </Box>
-          <Typography sx={{ color: '#5A6A7A', fontSize: '0.8rem' }}>
-            El estado corresponde a la validación del invitado, no al registro de ingreso.
-          </Typography>
+          <TextField fullWidth size="small" label="Documento" value={documento}
+            onChange={(e) => setDocumento(e.target.value.replace(/\D/g, ''))}
+            sx={{ '& .MuiOutlinedInput-root': { borderRadius: '8px' } }} />
         </DialogContent>
         <DialogActions sx={{ px: 3, pb: 2.5 }}>
           <Button onClick={() => setEditOpen(false)} sx={{ textTransform: 'none', color: '#5A6A7A' }}>Cancelar</Button>

@@ -6,7 +6,10 @@
   "type": "module",
   "scripts": {
     "start": "node index.js",
-    "dev": "nodemon index.js"
+    "dev": "nodemon index.js",
+    "verificar:vistas-institucionales": "node verificarVistasInstitucionales.js",
+    "crear:procesos-grado-prueba": "node crearProcesosGradoPrueba.js",
+    "eliminar:procesos-grado-prueba": "node eliminarProcesosGradoPrueba.js"
   },
   "keywords": [],
   "author": "",

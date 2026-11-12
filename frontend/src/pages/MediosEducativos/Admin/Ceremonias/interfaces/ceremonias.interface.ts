@@ -14,6 +14,7 @@ export interface Ceremonia {
   nombre: string;
   fecha: string;
   fechaISO: string;
+  periodoGrado: string | null;
   lugar: string;
   campus?: string;
   sesiones: number;
@@ -27,6 +28,7 @@ export interface Ceremonia {
 export interface NuevaCeremonia {
   nombre: string;
   fecha: string;
+  periodoGrado: string;
   idEvento?: number;
   idEspacio: number;
   estado: EstadoCeremonia;
@@ -39,12 +41,18 @@ export interface Sesion {
   numeroSesion: number;
   nombre: string;
   estado: EstadoSesion;
+  estadoManual: boolean;
   horaInicio?: string;
   horaFin?: string;
   programas: string[];
   programaIds?: number[];
   graduandosCount: number;
   invitadosCount: number;
+}
+
+export interface RequisitosInicioCeremonia {
+  puedeIniciar: boolean;
+  pendientes: string[];
 }
 
 export interface Graduando {

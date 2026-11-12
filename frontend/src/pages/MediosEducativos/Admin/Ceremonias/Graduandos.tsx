@@ -7,11 +7,14 @@ import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Alert, Box, Typography, Button, TextField, MenuItem, Table, TableBody,
   TableCell, TableContainer, TableHead, TableRow, Card, CardContent,
+  CircularProgress, Dialog, DialogActions, DialogContent, DialogTitle,
 } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
+import StorageIcon from '@mui/icons-material/Storage';
 import type { Ceremonia, Graduando, GraduandoFilters, ProgramaOption, Sesion } from './interfaces/ceremonias.interface';
-import { getGraduandos, getCeremoniaById, getProgramasCatalogo, getSesiones } from './services/ceremonias.service';
+import { getGraduandos, getCeremoniaById, getProgramasCatalogo, getSesiones, getGraduandosInstitucionales, type GraduandoInstitucional } from './services/ceremonias.service';
 import ImportarGraduandosDialog from './ImportarGraduandosDialog';
+import CandidatosPruebaDialog from './CandidatosPruebaDialog';
 
 export default function Graduandos() {
   const { id } = useParams<{ id: string }>();
@@ -29,6 +32,13 @@ export default function Graduandos() {
     programaFiltroInicial ? { programa: programaFiltroInicial } : {}
   );
   const [importOpen, setImportOpen] = useState(false);
+  const [consultaOpen, setConsultaOpen] = useState(false);
+  const [candidatosOpen, setCandidatosOpen] = useState(false);
+  const [paginaInstitucional, setPaginaInstitucional] = useState(1);
+  const [graduandosInstitucionales, setGraduandosInstitucionales] = useState<GraduandoInstitucional[]>([]);
+  const [haySiguiente, setHaySiguiente] = useState(false);
+  const [cargandoInstitucional, setCargandoInstitucional] = useState(false);
+  const [errorInstitucional, setErrorInstitucional] = useState('');
   const programaFiltroVisible = filters.programa
     && programas.some((programa) => String(programa.id_programa) === filters.programa)
     ? filters.programa
@@ -69,6 +79,27 @@ export default function Graduandos() {
       });
   }, [id]);
 
+  useEffect(() => {
+    if (!consultaOpen) return;
+    let vigente = true;
+    setCargandoInstitucional(true);
+    setErrorInstitucional('');
+    getGraduandosInstitucionales(paginaInstitucional)
+      .then((resultado) => {
+        if (!vigente) return;
+        setGraduandosInstitucionales(resultado.data);
+        setHaySiguiente(resultado.haySiguiente);
+      })
+      .catch((consultaError: unknown) => {
+        if (!vigente) return;
+        setGraduandosInstitucionales([]);
+        setHaySiguiente(false);
+        setErrorInstitucional(consultaError instanceof Error ? consultaError.message : 'No fue posible consultar los graduandos.');
+      })
+      .finally(() => { if (vigente) setCargandoInstitucional(false); });
+    return () => { vigente = false; };
+  }, [consultaOpen, paginaInstitucional]);
+
   return (
     <>
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 1, flexWrap: 'wrap', gap: 2 }}>
@@ -80,7 +111,7 @@ export default function Graduandos() {
             Eventos institucionales / Ceremonias de grado / Graduandos
           </Typography>
         </Box>
-        <Box sx={{ display: 'flex', gap: 1.5 }}>
+        <Box sx={{ display: 'flex', gap: 1.5, flexWrap: 'wrap' }}>
           <Button variant="outlined" startIcon={<AddIcon />}
             onClick={() => navigate(`/admin/eventos/ceremonias/${id}/graduandos/nuevo`)}
             sx={{ textTransform: 'none', fontWeight: 500, borderRadius: '8px', borderColor: '#C5CDD8', color: '#1A2A3A' }}>
@@ -92,6 +123,13 @@ export default function Graduandos() {
           }}>
             Importar graduandos
           </Button>
+          <Button variant="outlined" startIcon={<StorageIcon />} onClick={() => setConsultaOpen(true)}
+            sx={{ textTransform: 'none', borderRadius: '8px', borderColor: '#C5CDD8', color: '#1A2A3A' }}>
+            Consultar base de prueba
+          </Button>
+          {import.meta.env.DEV && (
+            <Button variant="outlined" onClick={() => setCandidatosOpen(true)}>Candidatos ficticios</Button>
+          )}
         </Box>
       </Box>
 
@@ -233,6 +271,50 @@ export default function Graduandos() {
         onClose={() => setImportOpen(false)}
         onImported={() => { void load(filters); }}
       />
+      <CandidatosPruebaDialog open={candidatosOpen} ceremoniaId={id || ''} periodo={ceremonia?.periodoGrado ?? null}
+        programas={programas} onClose={() => setCandidatosOpen(false)} onAdded={() => { void load(filters); }} />
+      <Dialog open={consultaOpen} onClose={() => setConsultaOpen(false)} fullWidth maxWidth="lg">
+        <DialogTitle>Graduandos de la base de prueba</DialogTitle>
+        <DialogContent>
+          <Typography sx={{ color: '#5A6A7A', fontSize: '0.875rem', mb: 2 }}>
+            Vista previa local. Estos registros no están asociados a la ceremonia.
+          </Typography>
+          {errorInstitucional && <Alert severity="error" sx={{ mb: 2 }}>{errorInstitucional}</Alert>}
+          {cargandoInstitucional ? (
+            <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}><CircularProgress size={28} /></Box>
+          ) : !errorInstitucional && graduandosInstitucionales.length === 0 ? (
+            <Typography sx={{ py: 3, textAlign: 'center', color: '#5A6A7A' }}>No hay registros en esta página.</Typography>
+          ) : (
+            <TableContainer>
+              <Table size="small" sx={{ minWidth: 700 }}>
+                <TableHead><TableRow>
+                  {['Graduando', 'Documento', 'Programa', 'Código', 'Estado', 'Periodo'].map((columna) => (
+                    <TableCell key={columna} sx={{ fontWeight: 600 }}>{columna}</TableCell>
+                  ))}
+                </TableRow></TableHead>
+                <TableBody>
+                  {graduandosInstitucionales.map((graduando, index) => (
+                    <TableRow key={`${graduando.codigo}-${graduando.documento}-${index}`}>
+                      <TableCell>{graduando.nombre || '—'}</TableCell>
+                      <TableCell>{graduando.documento || '—'}</TableCell>
+                      <TableCell>{graduando.programa || '—'}</TableCell>
+                      <TableCell>{graduando.codigo || '—'}</TableCell>
+                      <TableCell>{graduando.estado || '—'}</TableCell>
+                      <TableCell>{graduando.periodo || '—'}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </TableContainer>
+          )}
+        </DialogContent>
+        <DialogActions sx={{ flexWrap: 'wrap', px: 3, pb: 2 }}>
+          <Button disabled={paginaInstitucional === 1 || cargandoInstitucional} onClick={() => setPaginaInstitucional((pagina) => pagina - 1)}>Anterior</Button>
+          <Typography sx={{ fontSize: '0.875rem' }}>Página {paginaInstitucional}</Typography>
+          <Button disabled={!haySiguiente || cargandoInstitucional} onClick={() => setPaginaInstitucional((pagina) => pagina + 1)}>Siguiente</Button>
+          <Button onClick={() => setConsultaOpen(false)}>Cerrar</Button>
+        </DialogActions>
+      </Dialog>
     </>
   );
 }
