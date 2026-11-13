@@ -20,6 +20,11 @@ import {
   getCeremoniaById,
   getReservaHistoricaById,
 } from './services/historial.service';
+import ModalSesionesCeremonia from './components/ceremonias/ModalSesionesCeremonia';
+import ModalParticipantesCeremonia from './components/ceremonias/ModalParticipantesCeremonia';
+import ModalControlIngreso from './components/ceremonias/ModalControlIngreso';
+import EvidenciasFotograficasCeremonia from './components/ceremonias/EvidenciasFotograficasCeremonia';
+import ConteoProgramasCeremonia from './components/ceremonias/ConteoProgramasCeremonia';
 
 export default function FichaHistorica() {
   const { id } = useParams<{ id: string }>();
@@ -30,6 +35,7 @@ export default function FichaHistorica() {
   const [ficha, setFicha] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [modalActivo, setModalActivo] = useState<'sesiones' | 'participantes' | 'ingresos' | null>(null);
 
   useEffect(() => {
     let activo = true;
@@ -284,7 +290,7 @@ export default function FichaHistorica() {
 
   const kpis = [
     { label: 'Sesiones', value: ficha.sesiones ?? '—' },
-    { label: 'Programas', value: ficha.programasCount ?? '—' },
+    { label: 'Programas', value: id ? <ConteoProgramasCeremonia key={id} ceremoniaId={id} /> : '—' },
     { label: 'Graduandos', value: ficha.graduandos ?? 0, highlight: false },
     {
       label: 'Invitados',
@@ -480,6 +486,7 @@ export default function FichaHistorica() {
             </Box>
             <Button
               variant="text"
+              onClick={() => setModalActivo('sesiones')}
               sx={{
                 color: '#1565C0',
                 textTransform: 'none',
@@ -537,6 +544,7 @@ export default function FichaHistorica() {
             </Box>
             <Button
               variant="text"
+              onClick={() => setModalActivo('participantes')}
               sx={{
                 color: '#1565C0',
                 textTransform: 'none',
@@ -591,6 +599,7 @@ export default function FichaHistorica() {
             </Box>
             <Button
               variant="text"
+              onClick={() => setModalActivo('ingresos')}
               sx={{
                 color: '#1565C0',
                 textTransform: 'none',
@@ -627,24 +636,7 @@ export default function FichaHistorica() {
             <Typography sx={{ color: '#5A6A7A', fontSize: '0.85rem', mb: 2 }}>
               Registro visual conservado como parte del historial de la ceremonia.
             </Typography>
-            <Box sx={{ display: 'flex', gap: 1.25, flexWrap: 'wrap' }}>
-              {[
-                'linear-gradient(135deg, #1a3a5c, #4a6fa5)',
-                'linear-gradient(135deg, #2c3e50, #7f8c8d)',
-                'linear-gradient(135deg, #1e3a5f, #5d8aa8)',
-              ].map((bg, i) => (
-                <Box
-                  key={i}
-                  sx={{
-                    width: 88,
-                    height: 64,
-                    borderRadius: '8px',
-                    background: bg,
-                    flexShrink: 0,
-                  }}
-                />
-              ))}
-            </Box>
+            {id && <EvidenciasFotograficasCeremonia key={id} ceremoniaId={id} />}
           </CardContent>
         </Card>
       </Box>
@@ -653,6 +645,15 @@ export default function FichaHistorica() {
         Registro histórico de consulta. La {isReserva ? 'reserva' : 'ceremonia'}{' '}
         finalizada no se edita desde esta ficha.
       </Typography>
+      {id && modalActivo === 'sesiones' && (
+        <ModalSesionesCeremonia ceremoniaId={id} onClose={() => setModalActivo(null)} />
+      )}
+      {id && modalActivo === 'participantes' && (
+        <ModalParticipantesCeremonia ceremoniaId={id} onClose={() => setModalActivo(null)} />
+      )}
+      {id && modalActivo === 'ingresos' && (
+        <ModalControlIngreso ceremoniaId={id} onClose={() => setModalActivo(null)} />
+      )}
     </AdminLayout>
   );
 }

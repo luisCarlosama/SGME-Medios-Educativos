@@ -310,7 +310,7 @@ export default function ControlIngreso() {
     <>
       <Box sx={{ mb: 2.5 }}>
         <Typography variant="h4" sx={{ fontWeight: 700, color: '#0B1A2A', fontSize: '1.5rem', mb: 0.5 }}>
-          {ceremonia?.codigo || '—'} · Control de ingreso{selectedSession ? ` — ${sesionLabel}` : ''}
+          {ceremonia?.codigo || '—'} · Control de ingreso{selectedSession ? ` · ${sesionLabel}` : ''}
         </Typography>
         
       </Box>

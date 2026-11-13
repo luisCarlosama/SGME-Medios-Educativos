@@ -48,7 +48,9 @@ conservan la finalizacion manual; las nuevas se finalizan cuando termine la
 ultima sesion, siempre que la ceremonia este en curso.
 
 Las sesiones configuradas cambian automaticamente segun su horario solo
-mientras la ceremonia esta en curso. Al iniciar la ceremonia se actualizan de
+mientras la ceremonia esta en curso. Para iniciar la ceremonia debe existir
+al menos un invitado registrado en ella, no uno por cada graduando o sesion.
+Al iniciar la ceremonia se actualizan de
 inmediato las sesiones cuyo horario ya comenzo; si ya termino, se marcan como
 finalizadas. El proceso automatico revisa los horarios cada minuto. El modo
 manual de una sesion conserva el estado elegido hasta que se cambie de nuevo

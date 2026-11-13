@@ -11,14 +11,14 @@ const completa = {
   horarioValido: true,
   tienePrograma: true,
   graduandosCount: 2,
-  graduandosSinInvitados: 0,
+  tieneInvitado: true,
 };
 
 async function consultar(sesiones) {
   return consultarRequisitosInicioCeremonia({
     async query(sql, valores) {
       assert.match(sql, /FROM public\.sesion s/);
-      assert.match(sql, /NOT EXISTS\s*\(\s*SELECT 1 FROM public\.invitado/);
+      assert.match(sql, /EXISTS\s*\(\s*SELECT 1 FROM public\.invitado i\s+JOIN public\.graduando g ON g\.id_graduando = i\.id_graduando\s+WHERE g\.id_ceremonia = \$1/);
       assert.deepEqual(valores, ['1']);
       return { rows: sesiones };
     },
@@ -36,7 +36,6 @@ for (const [campo, valor, mensaje] of [
   ['horarioValido', false, /horario válido/],
   ['tienePrograma', false, /programa/],
   ['graduandosCount', 0, /graduando/],
-  ['graduandosSinInvitados', 1, /1 sin invitados/],
 ]) {
   test(`rechaza una sesión sin requisito: ${campo}`, async () => {
     const resultado = await consultar([{ ...completa, [campo]: valor }]);
@@ -48,13 +47,19 @@ for (const [campo, valor, mensaje] of [
 test('exige los requisitos en todas las sesiones', async () => {
   const resultado = await consultar([
     completa,
-    { ...completa, numeroSesion: 2, nombre: 'Tarde', graduandosSinInvitados: 1 },
+    { ...completa, numeroSesion: 2, nombre: 'Tarde', tienePrograma: false },
   ]);
   assert.equal(resultado.puedeIniciar, false);
   assert.match(resultado.pendientes[0], /Sesión 2 \(Tarde\)/);
 });
 
-test('permite iniciar cuando todas las sesiones cumplen los requisitos', async () => {
+test('exige al menos un invitado en la ceremonia', async () => {
+  const resultado = await consultar([{ ...completa, tieneInvitado: false }]);
+  assert.equal(resultado.puedeIniciar, false);
+  assert.match(resultado.pendientes[0], /al menos un invitado a la ceremonia/);
+});
+
+test('permite iniciar con un invitado en la ceremonia aunque haya varios graduandos y sesiones', async () => {
   const resultado = await consultar([completa, { ...completa, numeroSesion: 2 }]);
   assert.deepEqual(resultado, { puedeIniciar: true, pendientes: [] });
 });
@@ -98,9 +103,9 @@ async function cambiarEstado(estado, sesiones, estadoActual = 'Programada', sesi
 }
 
 test('el servidor rechaza el inicio incompleto sin cambiar el estado', async () => {
-  const { res, consultas } = await cambiarEstado('En curso', [{ ...completa, graduandosSinInvitados: 1 }]);
+  const { res, consultas } = await cambiarEstado('En curso', [{ ...completa, tieneInvitado: false }]);
   assert.equal(res.statusCode, 409);
-  assert.match(res.body.mensaje, /sin invitados/);
+  assert.match(res.body.mensaje, /al menos un invitado a la ceremonia/);
   assert.ok(consultas.includes('ROLLBACK'));
   assert.ok(!consultas.some((sql) => sql.includes('UPDATE public.ceremonia_grado')));
 });

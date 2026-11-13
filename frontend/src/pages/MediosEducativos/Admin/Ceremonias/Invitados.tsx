@@ -77,7 +77,7 @@ export default function Invitados() {
     <>
       <Box sx={{ mb: 2.5 }}>
         <Typography variant="h4" sx={{ fontWeight: 700, color: '#0B1A2A', fontSize: '1.75rem', mb: 0.5 }}>
-          Listado de Invitados — Gestión
+          Listado de Invitados
         </Typography>
         
       </Box>
