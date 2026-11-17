@@ -17,14 +17,8 @@ export default function ConteoProgramasCeremonia({ ceremoniaId }: Props) {
     setError(null);
     getSesiones(ceremoniaId)
       .then((sesiones) => {
-        const programas = new Set<number>();
-        for (const sesion of sesiones) {
-          if (!Array.isArray(sesion.programaIds)) {
-            throw new Error('No fue posible obtener los programas de las sesiones.');
-          }
-          sesion.programaIds.forEach((programaId) => programas.add(programaId));
-        }
-        if (activo) setConteo(programas.size);
+        const conteo = contarProgramasSesiones(sesiones);
+        if (activo) setConteo(conteo);
       })
       .catch((cause: unknown) => {
         if (activo) {
