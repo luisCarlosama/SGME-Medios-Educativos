@@ -6,6 +6,9 @@
 
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
+import * as XLSX from 'xlsx';
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
 import {
   Box,
   Typography,
@@ -13,6 +16,11 @@ import {
   Card,
   CardContent,
   CircularProgress,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  Alert,
 } from '@mui/material';
 import AdminLayout from '../../../../components/layout/AdminLayout';
 import type { HistorialCeremonia } from './interfaces/historial.interface';
@@ -20,6 +28,12 @@ import {
   getCeremoniaById,
   getReservaHistoricaById,
 } from './services/historial.service';
+import {
+  contarProgramasSesiones,
+  getGraduandos,
+  getInvitados,
+  getSesiones,
+} from '../Ceremonias/services/ceremonias.service';
 import ModalSesionesCeremonia from './components/ceremonias/ModalSesionesCeremonia';
 import ModalParticipantesCeremonia from './components/ceremonias/ModalParticipantesCeremonia';
 import ModalControlIngreso from './components/ceremonias/ModalControlIngreso';
@@ -36,6 +50,9 @@ export default function FichaHistorica() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [modalActivo, setModalActivo] = useState<'sesiones' | 'participantes' | 'ingresos' | null>(null);
+  const [modalExportar, setModalExportar] = useState(false);
+  const [exportando, setExportando] = useState(false);
+  const [errorExportar, setErrorExportar] = useState<string | null>(null);
 
   useEffect(() => {
     let activo = true;
@@ -288,6 +305,68 @@ export default function FichaHistorica() {
   }
 
 
+  const handleExportar = async (formato: 'xlsx' | 'pdf') => {
+    if (!id) {
+      setErrorExportar('No se recibió el identificador de la ceremonia.');
+      return;
+    }
+
+    setExportando(true);
+    setErrorExportar(null);
+    try {
+      const [sesiones, graduandos, invitados] = await Promise.all([
+        getSesiones(id),
+        getGraduandos(id),
+        getInvitados(id),
+      ]);
+      const ingresos = graduandos.data.filter((graduando) => graduando.estadoIngreso === 'Ingresó').length
+        + invitados.filter((invitado) => invitado.estadoIngreso === 'Ingresó').length;
+      const ceremonia: HistorialCeremonia = ficha;
+      const filas: [string, string | number][] = [
+        ['Código', ceremonia.codigo ?? '-'],
+        ['Ceremonia', ceremonia.ceremonia ?? '-'],
+        ['Fecha', ceremonia.fechaLarga || ceremonia.fecha || '-'],
+        ['Espacio', ceremonia.espacio || '-'],
+        ['Campus', ceremonia.campus || '-'],
+        ['Estado', ceremonia.estado ?? '-'],
+        ['Sesiones', ceremonia.sesiones ?? '-'],
+        ['Programas', contarProgramasSesiones(sesiones)],
+        ['Graduandos', ceremonia.graduandos ?? 0],
+        ['Invitados', ceremonia.invitados ?? 0],
+        ['Ingresos registrados', ingresos],
+      ];
+      const codigoArchivo = String(ceremonia.codigo || id).replace(/[<>:"/\\|?*\x00-\x1F]/g, '_');
+      const nombreArchivo = `SGME_Historial_Ceremonia_${codigoArchivo}`;
+
+      if (formato === 'xlsx') {
+        const libro = XLSX.utils.book_new();
+        const hoja = XLSX.utils.aoa_to_sheet([['Campo', 'Valor'], ...filas]);
+        XLSX.utils.book_append_sheet(libro, hoja, 'Ceremonia');
+        XLSX.writeFile(libro, `${nombreArchivo}.xlsx`);
+      } else {
+        const doc = new jsPDF();
+        doc.setFontSize(14);
+        doc.text('SGME - Detalle histórico de ceremonia', 14, 15);
+        doc.setFontSize(9);
+        doc.text(`Generado: ${new Date().toLocaleString('es-CO')}`, 14, 22);
+        autoTable(doc, {
+          startY: 28,
+          head: [['Campo', 'Valor']],
+          body: filas.map(([campo, valor]) => [campo, String(valor)]),
+          styles: { fontSize: 9, cellPadding: 2 },
+          headStyles: { fillColor: [30, 58, 95] },
+        });
+        doc.save(`${nombreArchivo}.pdf`);
+      }
+      setModalExportar(false);
+    } catch (err: unknown) {
+      console.error('Error al exportar el detalle de la ceremonia:', err);
+      setErrorExportar(err instanceof Error ? err.message : 'No fue posible exportar el detalle de la ceremonia.');
+    } finally {
+      setExportando(false);
+    }
+  };
+
   const kpis = [
     { label: 'Sesiones', value: ficha.sesiones ?? '—' },
     { label: 'Programas', value: id ? <ConteoProgramasCeremonia key={id} ceremoniaId={id} /> : '—' },
@@ -331,6 +410,10 @@ export default function FichaHistorica() {
         </Box>
         <Button
           variant="contained"
+          onClick={() => {
+            setErrorExportar(null);
+            setModalExportar(true);
+          }}
           sx={{
             backgroundColor: '#0B3A5C',
             textTransform: 'none',
@@ -654,6 +737,52 @@ export default function FichaHistorica() {
       {id && modalActivo === 'ingresos' && (
         <ModalControlIngreso ceremoniaId={id} onClose={() => setModalActivo(null)} />
       )}
+      <Dialog
+        open={modalExportar}
+        onClose={exportando ? undefined : () => setModalExportar(false)}
+        maxWidth="xs"
+        fullWidth
+      >
+        <DialogTitle sx={{ fontWeight: 700, color: '#0F172A' }}>
+          Exportar detalle de ceremonia
+        </DialogTitle>
+        <DialogContent>
+          <Typography sx={{ color: '#475569', mb: 1 }}>
+            Se exportará el resumen de esta ceremonia.
+          </Typography>
+          {exportando && <Typography role="status">Preparando archivo...</Typography>}
+          {errorExportar && <Alert severity="error" sx={{ mt: 2 }}>{errorExportar}</Alert>}
+        </DialogContent>
+        <DialogActions sx={{ px: 3, pb: 2 }}>
+          <Button
+            onClick={() => setModalExportar(false)}
+            disabled={exportando}
+            sx={{ textTransform: 'none', color: '#64748B' }}
+          >
+            Cancelar
+          </Button>
+          <Button
+            variant="outlined"
+            disabled={exportando}
+            onClick={() => void handleExportar('xlsx')}
+            sx={{ textTransform: 'none', borderColor: '#1E3A5F', color: '#1E3A5F' }}
+          >
+            Excel
+          </Button>
+          <Button
+            variant="contained"
+            disabled={exportando}
+            onClick={() => void handleExportar('pdf')}
+            sx={{
+              textTransform: 'none',
+              backgroundColor: '#1E3A5F',
+              '&:hover': { backgroundColor: '#0F2744' },
+            }}
+          >
+            PDF
+          </Button>
+        </DialogActions>
+      </Dialog>
     </AdminLayout>
   );
 }

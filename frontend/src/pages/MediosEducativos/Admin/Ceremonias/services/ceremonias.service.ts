@@ -271,6 +271,17 @@ export async function getSesiones(ceremoniaId: string): Promise<Sesion[]> {
   return respuestaCeremonia<Sesion[]>(respuesta);
 }
 
+export function contarProgramasSesiones(sesiones: Sesion[]): number {
+  const programas = new Set<number>();
+  for (const sesion of sesiones) {
+    if (!Array.isArray(sesion.programaIds)) {
+      throw new Error('No fue posible obtener los programas de las sesiones.');
+    }
+    sesion.programaIds.forEach((programaId) => programas.add(programaId));
+  }
+  return programas.size;
+}
+
 export async function getRequisitosInicioCeremonia(ceremoniaId: string): Promise<RequisitosInicioCeremonia> {
   const respuesta = await fetchBackend(
     `/api/ceremonias/${encodeURIComponent(ceremoniaId)}/requisitos-inicio`

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Box, Button, CircularProgress, Typography } from '@mui/material';
-import { getSesiones } from '../../../Ceremonias/services/ceremonias.service';
+import { contarProgramasSesiones, getSesiones } from '../../../Ceremonias/services/ceremonias.service';
 
 interface Props {
   ceremoniaId: string;
