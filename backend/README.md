@@ -33,9 +33,10 @@ vistas sin consultar registros de estudiantes. La importacion de graduandos
 todavia no esta conectada a estas vistas: antes deben confirmarse las columnas,
 las relaciones y los estados que habilitan a un aspirante para graduarse.
 
-Para consultar graduandos sin importarlos en desarrollo local, configura
-`INSTITUCIONAL_PREVIEW_LOCAL=true` y reinicia el backend. Esta consulta solo
-acepta conexiones locales y esta desactivada cuando `NODE_ENV=production`.
+La ruta de vista previa del backend permanece disponible para desarrollo local,
+pero ya no tiene un boton en la pantalla de graduandos. Para habilitarla,
+configura `INSTITUCIONAL_PREVIEW_LOCAL=true` y reinicia el backend. Esta ruta
+solo acepta conexiones locales y esta desactivada cuando `NODE_ENV=production`.
 No se debe habilitar en servidores compartidos ni exponer detras de un proxy;
 el proyecto aun no tiene autorizacion de servidor para esta ruta.
 

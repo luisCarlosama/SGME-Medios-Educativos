@@ -136,24 +136,6 @@ export interface GraduandoRegistroPublico {
   invitadosRegistrados: number;
 }
 
-export interface GraduandoInstitucional {
-  nombre: string | null;
-  documento: string | null;
-  programa: string | null;
-  codigo: string | null;
-  estado: string | null;
-  periodo: string | null;
-}
-
-export async function getGraduandosInstitucionales(pagina: number): Promise<{
-  data: GraduandoInstitucional[];
-  pagina: number;
-  haySiguiente: boolean;
-}> {
-  const respuesta = await fetchBackend(`/api/ceremonias/graduandos-institucionales?pagina=${pagina}`);
-  return respuestaCeremonia(respuesta);
-}
-
 export async function iniciarSesionGraduando(
   documento: string,
   codigoEstudiantil: string,
