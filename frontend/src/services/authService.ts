@@ -1,7 +1,7 @@
 
 import axios from 'axios';
 
-const API_URL = 'http://localhost:6001/api/auth';
+const API_URL = `${import.meta.env.VITE_API_URL || 'http://localhost:6001/api'}/auth`;
 
 export interface Administrador {
   id_admin: number;

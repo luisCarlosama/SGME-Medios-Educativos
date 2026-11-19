@@ -1,3 +1,15 @@
+export interface RespuestaNotificacion {
+  enviada: boolean;
+  simulado: boolean;
+  correo: string | null;
+}
+
+export interface RespuestaActualizarEstado {
+  mensaje: string;
+  solicitud: any;
+  notificacion: RespuestaNotificacion;
+}
+
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:6001/api";
 
 async function solicitar<T>(ruta: string, opciones?: RequestInit): Promise<T> {
@@ -5,6 +17,7 @@ async function solicitar<T>(ruta: string, opciones?: RequestInit): Promise<T> {
     ...opciones,
     headers: {
       "Content-Type": "application/json",
+      "ngrok-skip-browser-warning": "true",
       ...opciones?.headers,
     },
   });
@@ -12,11 +25,14 @@ async function solicitar<T>(ruta: string, opciones?: RequestInit): Promise<T> {
   const datos = await respuesta.json().catch(() => ({}));
 
   if (!respuesta.ok) {
-    throw new Error(datos.mensaje || "No fue posible comunicarse con el servidor.");
+    throw new Error(
+      datos.mensaje || "No fue posible comunicarse con el servidor."
+    );
   }
 
   return datos;
 }
+
 
 export async function listarSolicitudes(filtros: Record<string, string> = {}) {
   const params = new URLSearchParams();
@@ -34,14 +50,17 @@ export async function obtenerSolicitudPorId(id: number | string) {
 }
 
 export async function actualizarEstadoSolicitud(
-  id: number | string,
-  estado: "Aprobada" | "Rechazada" | "Cancelada",
-  motivo?: string
-) {
-  return solicitar<any>(`/reservas/${id}/estado`, {
-    method: "PATCH",
-    body: JSON.stringify({ estado, motivo_cancelacion: motivo || null }),
-  });
+    id: number | string,
+    estado: "Aprobada" | "Rechazada" | "Cancelada",
+    motivo?: string
+): Promise<RespuestaActualizarEstado> {
+    return solicitar<RespuestaActualizarEstado>(`/reservas/${id}/estado`, {
+        method: "PATCH",
+        body: JSON.stringify({
+            estado,
+            motivo_cancelacion: motivo || null,
+        }),
+    });
 }
 
 export async function actualizarSolicitud(

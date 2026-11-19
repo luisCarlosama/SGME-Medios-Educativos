@@ -20,13 +20,10 @@ import {
 import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
 import { useNavigate } from "react-router-dom";
 import {
-  obtenerAreas,
   obtenerCampus,
-  obtenerDependencias,
   obtenerEspacios,
-  obtenerDepartamentos,
-  obtenerProgramas,
   obtenerTiposEspacio,
+  obtenerCatalogosInstitucionales,
   crearSolicitud,
 } from "./services/reservas.service";
 
@@ -66,9 +63,8 @@ type Formulario = {
   tipo_entidad: string;
   ciudad: string;
   id_dependencia: string;
+  id_facultad: string;
   id_programa: string;
-  id_area: string;
-  id_departamento: string;
   id_campus: string;
   id_tipo_espacio: string;
   id_espacio: string;
@@ -91,9 +87,8 @@ const FORM_INICIAL: Formulario = {
   tipo_entidad: "",
   ciudad: "",
   id_dependencia: "",
+  id_facultad: "",
   id_programa: "",
-  id_area: "",
-  id_departamento: "",
   id_campus: "",
   id_tipo_espacio: "",
   id_espacio: "",
@@ -115,9 +110,8 @@ const perfilCampos: (keyof Formulario)[] = [
   "tipo_entidad",
   "ciudad",
   "id_dependencia",
+  "id_facultad",
   "id_programa",
-  "id_area",
-  "id_departamento",
 ];
 
 function fechaLocal(fecha: Date): string {
@@ -208,9 +202,10 @@ export default function FormularioReserva() {
   const [campus, setCampus] = useState<Opcion[]>([]);
   const [tiposEspacio, setTiposEspacio] = useState<Opcion[]>([]);
   const [espacios, setEspacios] = useState<Opcion[]>([]);
-  const [programas, setProgramas] = useState<Opcion[]>([]);
+  const [programas, setProgramas] = useState<(Opcion & { id_facultad: number })[]>([]);
   const [dependencias, setDependencias] = useState<Opcion[]>([]);
-  const [areas, setAreas] = useState<Opcion[]>([]); const [departamentos, setDepartamentos] = useState<Opcion[]>([]); const [grupos, setGrupos] = useState<Opcion[]>([]);
+  const [facultades, setFacultades] = useState<Opcion[]>([]);
+  const [grupos, setGrupos] = useState<Opcion[]>([]);
 
   const [form, setForm] = useState<Formulario>(FORM_INICIAL);
   const [medios, setMedios] = useState<Record<string, boolean>>({});
@@ -280,35 +275,54 @@ export default function FormularioReserva() {
     }
   }, [form, medios, esRecurrente, diasSeleccionados, inicializado]);
 
-  // Cargar catálogos
+  // Cargar catálogos generales
   useEffect(() => {
     let activo = true;
     setCargandoCatalogos(true);
 
     Promise.all([
       obtenerCampus(),
-      obtenerTiposEspacio(),
-      obtenerProgramas(),
-      obtenerDependencias(),
-      obtenerAreas(),
-      obtenerDepartamentos(),
+      obtenerCatalogosInstitucionales(),
     ])
-      .then(([c, t, p, d, a, dep]) => {
+      .then(([c, catalogos]) => {
         if (!activo) return;
 
-        setCampus(c.map((x: any) => ({ id: Number(x.id_campus), nombre: x.nombre })));
-        setTiposEspacio(t.map((x: any) => ({ id: Number(x.id_tipo_espacio), nombre: x.nombre })));
-        setProgramas(p.map((x: any) => ({ id: Number(x.id_programa), nombre: x.nombre })));
-        setDependencias(d.map((x: any) => ({ id: Number(x.id_dependencia), nombre: x.nombre })));
-        setAreas(a.map((x: any) => ({ id: Number(x.id_area), nombre: x.nombre })));
-        setDepartamentos(dep.map((x: any) => ({
-          id: Number(x.id_departamento),
-          nombre: x.nombre
-        })));
+        setCampus(
+          (Array.isArray(c) ? c : []).map((x: any) => ({
+            id: Number(x.id_campus),
+            nombre: x.nombre,
+          }))
+        );
+
+        setDependencias(
+          (Array.isArray(catalogos.dependencias) ? catalogos.dependencias : []).map((x: any) => ({
+            id: Number(x.id_dependencia),
+            nombre: x.nombre,
+          }))
+        );
+
+        setFacultades(
+          (Array.isArray(catalogos.facultades) ? catalogos.facultades : []).map((x: any) => ({
+            id: Number(x.id_facultad),
+            nombre: x.nombre,
+          }))
+        );
+
+        setProgramas(
+          (Array.isArray(catalogos.programas) ? catalogos.programas : []).map((x: any) => ({
+            id: Number(x.id_programa),
+            nombre: x.nombre,
+            id_facultad: Number(x.id_facultad),
+          }))
+        );
       })
       .catch((err: unknown) => {
         if (activo) {
-          setError(err instanceof Error ? err.message : "No se pudieron cargar los catálogos.");
+          setError(
+            err instanceof Error
+              ? err.message
+              : "No se pudieron cargar los catálogos."
+          );
         }
       })
       .finally(() => {
@@ -320,32 +334,108 @@ export default function FormularioReserva() {
     };
   }, []);
 
-  // Cargar espacios
+  // Cargar tipos de espacio según el campus seleccionado
   useEffect(() => {
     let activo = true;
 
-    if (!form.id_campus && !form.id_tipo_espacio) {
-      setEspacios([]);
-      setForm((prev) => (prev.id_espacio ? { ...prev, id_espacio: "" } : prev));
+    // Si no hay campus seleccionado, limpiar tipos
+    if (!form.id_campus) {
+      setTiposEspacio([]);
       return;
     }
 
-    obtenerEspacios(form.id_campus || undefined, form.id_tipo_espacio || undefined)
+    obtenerTiposEspacio(Number(form.id_campus))
       .then((lista) => {
         if (!activo) return;
 
-        setEspacios(lista.map((x: any) => ({ id: Number(x.id_espacio), nombre: x.nombre })));
+        const tipos = (Array.isArray(lista) ? lista : []).map((x: any) => ({
+          id: Number(x.id_tipo_espacio),
+          nombre: x.nombre,
+        }));
 
+        setTiposEspacio(tipos);
+
+        // Verificar si el tipo seleccionado pertenece al campus
         setForm((prev) => {
-          const sigueDisponible = lista.some(
-            (e: any) => Number(e.id_espacio) === Number(prev.id_espacio)
+          const tipoDisponible = tipos.some(
+            (t) => t.id === Number(prev.id_tipo_espacio)
           );
-          return prev.id_espacio && !sigueDisponible ? { ...prev, id_espacio: "" } : prev;
+
+          if (prev.id_tipo_espacio && !tipoDisponible) {
+            return {
+              ...prev,
+              id_tipo_espacio: "",
+              id_espacio: "",
+            };
+          }
+
+          return prev;
         });
       })
       .catch((err: unknown) => {
         if (activo) {
-          setError(err instanceof Error ? err.message : "No se pudieron cargar los espacios.");
+          setTiposEspacio([]);
+          setError(
+            err instanceof Error
+              ? err.message
+              : "No se pudieron cargar los tipos de espacio."
+          );
+        }
+      });
+
+    return () => {
+      activo = false;
+    };
+  }, [form.id_campus]);
+
+  // Cargar espacios según campus y tipo seleccionados
+  useEffect(() => {
+    let activo = true;
+
+    if (!form.id_campus || !form.id_tipo_espacio) {
+      setEspacios([]);
+
+      setForm((prev) =>
+        prev.id_espacio ? { ...prev, id_espacio: "" } : prev
+      );
+
+      return;
+    }
+
+    obtenerEspacios(
+      Number(form.id_campus),
+      Number(form.id_tipo_espacio)
+    )
+      .then((lista) => {
+        if (!activo) return;
+
+        const disponibles = Array.isArray(lista) ? lista : [];
+
+        setEspacios(
+          disponibles.map((x: any) => ({
+            id: Number(x.id_espacio),
+            nombre: x.nombre,
+          }))
+        );
+
+        setForm((prev) => {
+          const sigueDisponible = disponibles.some(
+            (e: any) => Number(e.id_espacio) === Number(prev.id_espacio)
+          );
+
+          return prev.id_espacio && !sigueDisponible
+            ? { ...prev, id_espacio: "" }
+            : prev;
+        });
+      })
+      .catch((err: unknown) => {
+        if (activo) {
+          setEspacios([]);
+          setError(
+            err instanceof Error
+              ? err.message
+              : "No se pudieron cargar los espacios."
+          );
         }
       });
 
@@ -364,6 +454,10 @@ export default function FormularioReserva() {
 
           if (campo === "id_campus" || campo === "id_tipo_espacio") {
             actualizado.id_espacio = "";
+          }
+
+          if (campo === "id_facultad") {
+            actualizado.id_programa = "";
           }
 
           return actualizado;
@@ -461,6 +555,11 @@ export default function FormularioReserva() {
       return;
     }
 
+    if (esInterno && (!form.id_dependencia || !form.id_facultad || !form.id_programa)) {
+      setError("Selecciona la dependencia general, la facultad y el programa.");
+      return;
+    }
+
     if (!esInterno && !form.identificacion.trim()) {
       setError("La identificación es obligatoria para solicitantes externos.");
       return;
@@ -539,8 +638,6 @@ export default function FormularioReserva() {
         ciudad: esInterno ? null : form.ciudad.trim(),
         id_programa: esInterno && form.id_programa ? Number(form.id_programa) : null,
         id_dependencia: esInterno && form.id_dependencia ? Number(form.id_dependencia) : null,
-        id_area: esInterno && form.id_area ? Number(form.id_area) : null,
-        id_departamento: esInterno && form.id_departamento ? Number(form.id_departamento) : null,
         id_espacio: Number(form.id_espacio),
         fecha_inicio: form.fecha_inicio,
         fecha_fin: form.fecha_fin,
@@ -1122,49 +1219,36 @@ export default function FormularioReserva() {
                 <TextField
                   select
                   size="small"
-                  label="Programa / Dependencia específico *"
+                  label="Facultad *"
+                  value={form.id_facultad}
+                  onChange={handleChange("id_facultad")}
+                  sx={campoSx}
+                >
+                  <MenuItem value="">Seleccione una facultad</MenuItem>
+                  {facultades.map((x) => (
+                    <MenuItem key={x.id} value={x.id}>
+                      {x.nombre}
+                    </MenuItem>
+                  ))}
+                </TextField>
+
+                <TextField
+                  select
+                  size="small"
+                  label="Programa *"
                   value={form.id_programa}
                   onChange={handleChange("id_programa")}
+                  disabled={!form.id_facultad}
                   sx={campoSx}
                 >
-                  <MenuItem value="">Seleccione una opción</MenuItem>
-                  {programas.map((x) => (
-                    <MenuItem key={x.id} value={x.id}>
-                      {x.nombre}
-                    </MenuItem>
-                  ))}
-                </TextField>
-
-                <TextField
-                  select
-                  size="small"
-                  label="Área"
-                  value={form.id_area}
-                  onChange={handleChange("id_area")}
-                  sx={campoSx}
-                >
-                  <MenuItem value="">Seleccione una opción</MenuItem>
-                  {areas.map((x) => (
-                    <MenuItem key={x.id} value={x.id}>
-                      {x.nombre}
-                    </MenuItem>
-                  ))}
-                </TextField>
-
-                <TextField
-                  select
-                  size="small"
-                  label="Departamento"
-                  value={form.id_departamento}
-                  onChange={handleChange("id_departamento")}
-                  sx={campoSx}
-                >
-                  <MenuItem value="">Seleccione una opción</MenuItem>
-                  {departamentos.map((x) => (
-                    <MenuItem key={x.id} value={x.id}>
-                      {x.nombre}
-                    </MenuItem>
-                  ))}
+                  <MenuItem value="">Seleccione un programa</MenuItem>
+                  {programas
+                    .filter((x) => x.id_facultad === Number(form.id_facultad))
+                    .map((x) => (
+                      <MenuItem key={x.id} value={x.id}>
+                        {x.nombre}
+                      </MenuItem>
+                    ))}
                 </TextField>
               </Box>
             ) : (
@@ -1320,7 +1404,7 @@ export default function FormularioReserva() {
             </Typography>
 
             <Box sx={{ display: "flex", flexWrap: "wrap", gap: 1, mb: 2 }}>
-              {["Proyector", "Sonido", "Micrófono", "Computador", "Otro"].map((medio) => (
+              {["PC", "Proyector", "Sonido", "Micrófono", "Pantalla", "Internet", "Parlantes"].map((medio) => (
                 <FormControlLabel
                   key={medio}
                   control={

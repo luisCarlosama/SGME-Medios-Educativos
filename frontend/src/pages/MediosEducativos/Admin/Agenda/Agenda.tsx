@@ -1,3 +1,4 @@
+
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
@@ -19,10 +20,15 @@ import {
 import * as XLSX from "xlsx";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
+
 import AdminLayout from "../../../../components/layout/AdminLayout";
-import ModalExportar from "../Dashboard/components/ModalExportar";
+import ModalExportarAgenda from "./components/ModalExportarAgenda";
 import { listarAgenda } from "./services/agenda.service";
-import { obtenerCampus, obtenerTiposEspacio, obtenerEspacios } from "../../Public/Reserva/services/reservas.service";
+import {
+  obtenerCampus,
+  obtenerTiposEspacio,
+  obtenerEspacios,
+} from "../../Public/Reserva/services/reservas.service";
 
 const estadoStyles: Record<string, { bg: string; color: string }> = {
   Aprobada: { bg: "#D1FAE5", color: "#047857" },
@@ -33,8 +39,10 @@ const estadoStyles: Record<string, { bg: string; color: string }> = {
 
 function formatearFecha(fecha: string): string {
   if (!fecha) return "—";
+
   const solo = String(fecha).split("T")[0];
   const [a, m, d] = solo.split("-");
+
   return `${d}/${m}/${a}`;
 }
 
@@ -46,16 +54,20 @@ function formatearHora(hora: string): string {
 export default function Agenda() {
   const navigate = useNavigate();
 
+  // Estado del modal de exportación
   const [modalExportar, setModalExportar] = useState(false);
 
+  // Datos de agenda
   const [reservas, setReservas] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
+  // Catálogos
   const [campusLista, setCampusLista] = useState<any[]>([]);
   const [tiposEspacio, setTiposEspacio] = useState<any[]>([]);
   const [espacios, setEspacios] = useState<any[]>([]);
 
+  // Filtros
   const [campusTab, setCampusTab] = useState("Todos");
   const [fecha, setFecha] = useState("");
   const [idTipoEspacio, setIdTipoEspacio] = useState("");
@@ -63,73 +75,102 @@ export default function Agenda() {
   const [tipo, setTipo] = useState("");
   const [busqueda, setBusqueda] = useState("");
 
+  // Cargar catálogos
   const cargarCatalogos = async () => {
     try {
-      const [c, t] = await Promise.all([obtenerCampus(), obtenerTiposEspacio()]);
+      const [c, t] = await Promise.all([
+        obtenerCampus(),
+        obtenerTiposEspacio(),
+      ]);
+
       setCampusLista(
         c.map((x: any) => ({
           id: x.id_campus,
           nombre: x.nombre,
         }))
       );
+
       setTiposEspacio(
         t.map((x: any) => ({
           id: x.id_tipo_espacio,
           nombre: x.nombre,
         }))
       );
-    } catch {
-      // silencioso
+    } catch (err) {
+      console.error("Error al cargar catálogos:", err);
     }
   };
 
-  const cargarAgenda = async (filtrosExtra: Record<string, string> = {}) => {
+  // Cargar agenda aplicando filtros
+  const cargarAgenda = async (
+    filtrosExtra: Record<string, string> = {}
+  ) => {
     setLoading(true);
     setError("");
+
     try {
       const filtros: Record<string, string> = { ...filtrosExtra };
 
-      // Solo agrega del estado lo que NO venga en filtrosExtra
       if (!("campus" in filtrosExtra) && campusTab && campusTab !== "Todos") {
         filtros.campus = campusTab;
       }
-      if (!("fecha" in filtrosExtra) && fecha) filtros.fecha = fecha;
+
+      if (!("fecha" in filtrosExtra) && fecha) {
+        filtros.fecha = fecha;
+      }
+
       if (!("tipo_espacio" in filtrosExtra) && idTipoEspacio) {
         filtros.tipo_espacio = idTipoEspacio;
       }
-      if (!("espacio" in filtrosExtra) && idEspacio) filtros.espacio = idEspacio;
-      if (!("tipo" in filtrosExtra) && tipo) filtros.tipo = tipo;
+
+      if (!("espacio" in filtrosExtra) && idEspacio) {
+        filtros.espacio = idEspacio;
+      }
+
+      if (!("tipo" in filtrosExtra) && tipo) {
+        filtros.tipo = tipo;
+      }
+
       if (!("busqueda" in filtrosExtra) && busqueda.trim()) {
         filtros.busqueda = busqueda.trim();
       }
 
-      // Si campus viene vacío explícito, no lo mandes
       if (filtros.campus === "") delete filtros.campus;
+      if (filtros.fecha === "") delete filtros.fecha;
+      if (filtros.tipo_espacio === "") delete filtros.tipo_espacio;
+      if (filtros.espacio === "") delete filtros.espacio;
+      if (filtros.tipo === "") delete filtros.tipo;
+      if (filtros.busqueda === "") delete filtros.busqueda;
 
       const data = await listarAgenda(filtros);
       setReservas(data || []);
     } catch (err: unknown) {
       setError(
-        err instanceof Error ? err.message : "No se pudo cargar la agenda."
+        err instanceof Error
+          ? err.message
+          : "No se pudo cargar la agenda."
       );
     } finally {
       setLoading(false);
     }
   };
 
+  // Carga inicial
   useEffect(() => {
     cargarCatalogos();
     cargarAgenda();
   }, []);
 
+  // Cargar espacios según campus y tipo de espacio
   useEffect(() => {
-    if (!idTipoEspacio && !campusTab) {
-      setEspacios([]);
-      return;
-    }
-    const campusId = campusLista.find((c) => c.nombre === campusTab)?.id;
+    const campusId = campusLista.find(
+      (c) => c.nombre === campusTab
+    )?.id;
+
     obtenerEspacios(
-      campusTab !== "Todos" && campusId ? String(campusId) : undefined,
+      campusTab !== "Todos" && campusId
+        ? String(campusId)
+        : undefined,
       idTipoEspacio || undefined
     )
       .then((lista) =>
@@ -143,9 +184,12 @@ export default function Agenda() {
       .catch(() => setEspacios([]));
   }, [idTipoEspacio, campusTab, campusLista]);
 
-  const handleAplicar = () => cargarAgenda();
+  // Aplicar filtros
+  const handleAplicar = () => {
+    cargarAgenda();
+  };
 
-
+  // Limpiar filtros
   const handleLimpiar = () => {
     setCampusTab("Todos");
     setFecha("");
@@ -164,94 +208,121 @@ export default function Agenda() {
     });
   };
 
-
-  const handleExportar = async (
+  // Exportar agenda a Excel o PDF
+  const handleExportar = (
     tipoSeleccionado: "externas" | "internas" | "todas",
     formato: "xlsx" | "pdf"
   ) => {
-    // Los filtros de Agenda ya fueron aplicados al cargar "reservas".
-    // Aquí solo aplicamos el tipo elegido en el modal.
-    const reservasExportar = reservas.filter((r) => {
-      const tipoReserva = String(r.tipo ?? "").trim().toLowerCase();
+    let lista = [...reservas];
 
-      if (tipoSeleccionado === "todas") return true;
-
-      if (tipoSeleccionado === "internas") {
-        return ["interno", "interna", "institucional"].includes(tipoReserva);
-      }
-
-      if (tipoSeleccionado === "externas") {
-        return ["externo", "externa"].includes(tipoReserva);
-      }
-
-      return false;
-    });
-
-    if (!reservasExportar.length) {
-      alert("No hay reservas del tipo seleccionado para exportar.");
-      return;
+    if (tipoSeleccionado === "externas") {
+      lista = lista.filter(
+        (r) => String(r.tipo).toLowerCase() === "externo"
+      );
     }
 
-    const filas = reservasExportar.map((r, i) => {
-      const tipoReserva = String(r.tipo ?? "").trim().toLowerCase();
+    if (tipoSeleccionado === "internas") {
+      lista = lista.filter(
+        (r) => String(r.tipo).toLowerCase() === "interno"
+      );
+    }
 
-      return {
-        "N°": i + 1,
-        Código: r.codigo,
-        Actividad: r.actividad,
-        Tipo: ["interno", "interna", "institucional"].includes(tipoReserva)
+    const filas = lista.map((r, index) => ({
+      "N°": index + 1,
+      Código: r.codigo ?? "",
+      Actividad: r.actividad ?? "",
+      Tipo:
+        String(r.tipo).toLowerCase() === "interno"
           ? "Institucional"
           : "Externa",
-        Solicitante: r.solicitante,
-        Espacio: r.espacio,
-        Campus: r.campus,
-        "Fecha reserva": formatearFecha(r.fecha),
-        Horario: `${formatearHora(r.hora_inicio)} - ${formatearHora(r.hora_fin)}`,
-        Estado: r.estado,
-      };
-    });
-
-    // Fecha local para evitar cambios de día por conversión UTC.
-    const ahora = new Date();
-    const fechaGen = [
-      ahora.getFullYear(),
-      String(ahora.getMonth() + 1).padStart(2, "0"),
-      String(ahora.getDate()).padStart(2, "0"),
-    ].join("-");
+      Solicitante: r.solicitante ?? "",
+      Espacio: r.espacio ?? "",
+      Campus: r.campus ?? "",
+      "Fecha reserva": formatearFecha(r.fecha),
+      Horario: `${formatearHora(r.hora_inicio)} - ${formatearHora(
+        r.hora_fin
+      )}`,
+      Estado: r.estado ?? "",
+    }));
 
     if (formato === "xlsx") {
-      const wb = XLSX.utils.book_new();
-      const ws = XLSX.utils.json_to_sheet(filas);
-      XLSX.utils.book_append_sheet(wb, ws, "Agenda");
-      XLSX.writeFile(wb, `SGME_Agenda_${fechaGen}.xlsx`);
-      return;
+      const hoja = XLSX.utils.json_to_sheet(filas);
+      const libro = XLSX.utils.book_new();
+
+      XLSX.utils.book_append_sheet(libro, hoja, "Agenda");
+
+      XLSX.writeFile(
+        libro,
+        `Agenda_${tipoSeleccionado}.xlsx`
+      );
+    } else {
+      const documento = new jsPDF({
+        orientation: "landscape",
+        unit: "mm",
+        format: "a4",
+      });
+
+      documento.setFontSize(16);
+      documento.text("Agenda de reservas", 14, 15);
+
+      documento.setFontSize(10);
+      documento.text(
+        `Tipo de solicitudes: ${tipoSeleccionado}`,
+        14,
+        22
+      );
+
+      autoTable(documento, {
+        startY: 28,
+        head: [
+          [
+            "N°",
+            "Código",
+            "Actividad",
+            "Tipo",
+            "Solicitante",
+            "Espacio",
+            "Campus",
+            "Fecha",
+            "Horario",
+            "Estado",
+          ],
+        ],
+        body: filas.map((f) => [
+          f["N°"],
+          f.Código,
+          f.Actividad,
+          f.Tipo,
+          f.Solicitante,
+          f.Espacio,
+          f.Campus,
+          f["Fecha reserva"],
+          f.Horario,
+          f.Estado,
+        ]),
+        styles: {
+          fontSize: 7,
+          cellPadding: 2,
+        },
+        headStyles: {
+          fillColor: [30, 58, 95],
+        },
+        margin: {
+          left: 10,
+          right: 10,
+        },
+      });
+
+      documento.save(`Agenda_${tipoSeleccionado}.pdf`);
     }
-
-    const doc = new jsPDF({ orientation: "landscape" });
-    doc.setFontSize(14);
-    doc.text("SGME - Agenda de reservas", 14, 15);
-    doc.setFontSize(10);
-    doc.text(`Generado: ${ahora.toLocaleString("es-CO")}`, 14, 22);
-    doc.text(`Registros exportados: ${filas.length}`, 14, 27);
-
-    autoTable(doc, {
-      startY: 32,
-      head: [Object.keys(filas[0])],
-      body: filas.map((f) => Object.values(f).map((v) => String(v ?? ""))),
-      styles: { fontSize: 7 },
-      headStyles: { fillColor: [30, 58, 95] },
-    });
-
-    doc.save(`SGME_Agenda_${fechaGen}.pdf`);
   };
-
 
   const tabsCampus = ["Todos", ...campusLista.map((c) => c.nombre)];
 
   return (
     <AdminLayout>
       <Box sx={{ width: "100%" }}>
-        {/* Header */}
+        {/* Encabezado */}
         <Box
           sx={{
             display: "flex",
@@ -264,12 +335,19 @@ export default function Agenda() {
         >
           <Box>
             <Typography
-              sx={{ fontWeight: 700, fontSize: "1.75rem", color: "#0F172A", mb: 0.5 }}
+              sx={{
+                fontWeight: 700,
+                fontSize: "1.75rem",
+                color: "#0F172A",
+                mb: 0.5,
+              }}
             >
               Agenda por campus
             </Typography>
+
             <Typography sx={{ color: "#64748B", fontSize: "0.95rem" }}>
-              Consulta y gestiona la agenda de reservas programadas por campus y espacio.
+              Consulta y gestiona la agenda de reservas programadas por
+              campus y espacio.
             </Typography>
           </Box>
 
@@ -287,6 +365,7 @@ export default function Agenda() {
             >
               Exportar agenda
             </Button>
+
             <Button
               variant="contained"
               onClick={() => navigate("/reserva")}
@@ -296,7 +375,10 @@ export default function Agenda() {
                 fontWeight: 600,
                 borderRadius: "8px",
                 boxShadow: "none",
-                "&:hover": { backgroundColor: "#C10510", boxShadow: "none" },
+                "&:hover": {
+                  backgroundColor: "#C10510",
+                  boxShadow: "none",
+                },
               }}
             >
               + Nueva reserva
@@ -304,13 +386,21 @@ export default function Agenda() {
           </Box>
         </Box>
 
-        {/* Tabs campus */}
-        <Box sx={{ display: "flex", gap: 1, mb: 2.5, flexWrap: "wrap" }}>
+        {/* Pestañas de campus */}
+        <Box
+          sx={{
+            display: "flex",
+            gap: 1,
+            mb: 2.5,
+            flexWrap: "wrap",
+          }}
+        >
           {tabsCampus.map((nombre) => (
             <Button
               key={nombre}
               onClick={() => {
                 setCampusTab(nombre);
+
                 cargarAgenda({
                   campus: nombre === "Todos" ? "" : nombre,
                 });
@@ -321,12 +411,18 @@ export default function Agenda() {
                 px: 2.5,
                 py: 0.75,
                 fontWeight: 600,
-                backgroundColor: campusTab === nombre ? "#E30613" : "#FFFFFF",
-                color: campusTab === nombre ? "#FFFFFF" : "#334155",
-                border: campusTab === nombre ? "none" : "1px solid #E2E8F0",
+                backgroundColor:
+                  campusTab === nombre ? "#E30613" : "#FFFFFF",
+                color:
+                  campusTab === nombre ? "#FFFFFF" : "#334155",
+                border:
+                  campusTab === nombre
+                    ? "none"
+                    : "1px solid #E2E8F0",
                 boxShadow: "none",
                 "&:hover": {
-                  backgroundColor: campusTab === nombre ? "#C10510" : "#F8FAFC",
+                  backgroundColor:
+                    campusTab === nombre ? "#C10510" : "#F8FAFC",
                   boxShadow: "none",
                 },
               }}
@@ -346,7 +442,14 @@ export default function Agenda() {
             mb: 2,
           }}
         >
-          <Typography sx={{ fontWeight: 600, fontSize: "0.9rem", mb: 1.5, color: "#0F172A" }}>
+          <Typography
+            sx={{
+              fontWeight: 600,
+              fontSize: "0.9rem",
+              mb: 1.5,
+              color: "#0F172A",
+            }}
+          >
             Filtros de agenda
           </Typography>
 
@@ -366,7 +469,6 @@ export default function Agenda() {
             <TextField
               size="small"
               type="date"
-              label=""
               value={fecha}
               onChange={(e) => setFecha(e.target.value)}
               slotProps={{
@@ -376,9 +478,12 @@ export default function Agenda() {
               }}
               sx={{
                 minWidth: 150,
-                "& input": { color: fecha ? "#0F172A" : "#94A3B8" },
+                "& input": {
+                  color: fecha ? "#0F172A" : "#94A3B8",
+                },
               }}
             />
+
             <TextField
               select
               size="small"
@@ -390,12 +495,14 @@ export default function Agenda() {
               }}
             >
               <MenuItem value="">Todos</MenuItem>
+
               {tiposEspacio.map((t) => (
                 <MenuItem key={t.id} value={t.id}>
                   {t.nombre}
                 </MenuItem>
               ))}
             </TextField>
+
             <TextField
               select
               size="small"
@@ -404,12 +511,14 @@ export default function Agenda() {
               onChange={(e) => setIdEspacio(e.target.value)}
             >
               <MenuItem value="">Todos</MenuItem>
+
               {espacios.map((e) => (
                 <MenuItem key={e.id} value={e.id}>
                   {e.nombre}
                 </MenuItem>
               ))}
             </TextField>
+
             <TextField
               select
               size="small"
@@ -421,6 +530,7 @@ export default function Agenda() {
               <MenuItem value="interno">Institucional</MenuItem>
               <MenuItem value="externo">Externa</MenuItem>
             </TextField>
+
             <Button
               variant="contained"
               onClick={handleAplicar}
@@ -430,11 +540,15 @@ export default function Agenda() {
                 fontWeight: 600,
                 borderRadius: "8px",
                 boxShadow: "none",
-                "&:hover": { backgroundColor: "#0F2744", boxShadow: "none" },
+                "&:hover": {
+                  backgroundColor: "#0F2744",
+                  boxShadow: "none",
+                },
               }}
             >
               Aplicar
             </Button>
+
             <Button
               variant="outlined"
               onClick={handleLimpiar}
@@ -462,22 +576,29 @@ export default function Agenda() {
               placeholder="Buscar por actividad, solicitante, espacio o código"
               value={busqueda}
               onChange={(e) => setBusqueda(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && handleAplicar()}
-              sx={{ flex: 1, minWidth: 240 }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") handleAplicar();
+              }}
+              sx={{
+                flex: 1,
+                minWidth: 240,
+              }}
             />
+
             <Typography sx={{ color: "#64748B", fontSize: "0.85rem" }}>
               {reservas.length} reservas agendadas
             </Typography>
           </Box>
         </Box>
 
+        {/* Mensaje de error */}
         {error && (
           <Alert severity="error" sx={{ mb: 2 }}>
             {error}
           </Alert>
         )}
 
-        {/* Tabla */}
+        {/* Tabla de agenda */}
         <TableContainer
           sx={{
             backgroundColor: "#FFFFFF",
@@ -517,16 +638,27 @@ export default function Agenda() {
                 ))}
               </TableRow>
             </TableHead>
+
             <TableBody>
               {loading ? (
                 <TableRow>
-                  <TableCell colSpan={10} sx={{ textAlign: "center", py: 5 }}>
+                  <TableCell
+                    colSpan={10}
+                    sx={{ textAlign: "center", py: 5 }}
+                  >
                     <CircularProgress size={26} />
                   </TableCell>
                 </TableRow>
               ) : reservas.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={10} sx={{ textAlign: "center", py: 5, color: "#64748B" }}>
+                  <TableCell
+                    colSpan={10}
+                    sx={{
+                      textAlign: "center",
+                      py: 5,
+                      color: "#64748B",
+                    }}
+                  >
                     No hay reservas aprobadas vigentes.
                   </TableCell>
                 </TableRow>
@@ -535,51 +667,122 @@ export default function Agenda() {
                   <TableRow
                     key={r.id}
                     sx={{
-                      "&:hover": { backgroundColor: "#F8FAFC" },
-                      "& td": { borderBottom: "1px solid #F1F5F9" },
+                      "&:hover": {
+                        backgroundColor: "#F8FAFC",
+                      },
+                      "& td": {
+                        borderBottom: "1px solid #F1F5F9",
+                      },
                     }}
                   >
-                    <TableCell sx={{ fontWeight: 600, fontSize: "0.8rem", py: 1.25, px: 1.25 }}>
+                    <TableCell
+                      sx={{
+                        fontWeight: 600,
+                        fontSize: "0.8rem",
+                        py: 1.25,
+                        px: 1.25,
+                      }}
+                    >
                       {r.codigo}
                     </TableCell>
-                    <TableCell sx={{ fontSize: "0.8rem", py: 1.25, px: 1.25 }}>
+
+                    <TableCell
+                      sx={{
+                        fontSize: "0.8rem",
+                        py: 1.25,
+                        px: 1.25,
+                      }}
+                    >
                       {r.actividad}
                     </TableCell>
-                    <TableCell sx={{ fontSize: "0.8rem", py: 1.25, px: 1.25 }}>
-                      {r.tipo === "interno" ? "Interna" : "Externa"}
+
+                    <TableCell
+                      sx={{
+                        fontSize: "0.8rem",
+                        py: 1.25,
+                        px: 1.25,
+                      }}
+                    >
+                      {String(r.tipo).toLowerCase() === "interno"
+                        ? "Interna"
+                        : "Externa"}
                     </TableCell>
-                    <TableCell sx={{ fontSize: "0.8rem", py: 1.25, px: 1.25 }}>
+
+                    <TableCell
+                      sx={{
+                        fontSize: "0.8rem",
+                        py: 1.25,
+                        px: 1.25,
+                      }}
+                    >
                       {r.solicitante}
                     </TableCell>
-                    <TableCell sx={{ fontSize: "0.8rem", py: 1.25, px: 1.25 }}>
+
+                    <TableCell
+                      sx={{
+                        fontSize: "0.8rem",
+                        py: 1.25,
+                        px: 1.25,
+                      }}
+                    >
                       {r.espacio}
                     </TableCell>
-                    <TableCell sx={{ fontSize: "0.8rem", py: 1.25, px: 1.25 }}>
+
+                    <TableCell
+                      sx={{
+                        fontSize: "0.8rem",
+                        py: 1.25,
+                        px: 1.25,
+                      }}
+                    >
                       {r.campus}
                     </TableCell>
-                    <TableCell sx={{ fontSize: "0.8rem", py: 1.25, px: 1.25, whiteSpace: "nowrap" }}>
+
+                    <TableCell
+                      sx={{
+                        fontSize: "0.8rem",
+                        py: 1.25,
+                        px: 1.25,
+                        whiteSpace: "nowrap",
+                      }}
+                    >
                       {formatearFecha(r.fecha)}
                     </TableCell>
-                    <TableCell sx={{ fontSize: "0.8rem", py: 1.25, px: 1.25, whiteSpace: "nowrap" }}>
-                      {formatearHora(r.hora_inicio)}–{formatearHora(r.hora_fin)}
+
+                    <TableCell
+                      sx={{
+                        fontSize: "0.8rem",
+                        py: 1.25,
+                        px: 1.25,
+                        whiteSpace: "nowrap",
+                      }}
+                    >
+                      {formatearHora(r.hora_inicio)}–
+                      {formatearHora(r.hora_fin)}
                     </TableCell>
+
                     <TableCell sx={{ py: 1.25, px: 1.25 }}>
                       <Chip
                         label={r.estado}
                         size="small"
                         sx={{
-                          backgroundColor: estadoStyles[r.estado]?.bg ?? "#F3F4F6",
-                          color: estadoStyles[r.estado]?.color ?? "#4B5563",
+                          backgroundColor:
+                            estadoStyles[r.estado]?.bg ?? "#F3F4F6",
+                          color:
+                            estadoStyles[r.estado]?.color ?? "#4B5563",
                           fontWeight: 600,
                           fontSize: "0.7rem",
                           height: 22,
                         }}
                       />
                     </TableCell>
+
                     <TableCell sx={{ py: 1.25, px: 1.25 }}>
                       <Button
                         size="small"
-                        onClick={() => navigate(`/admin/solicitudes/${r.id}`)}
+                        onClick={() =>
+                          navigate(`/admin/solicitudes/${r.id}`)
+                        }
                         sx={{
                           textTransform: "none",
                           fontWeight: 600,
@@ -599,12 +802,21 @@ export default function Agenda() {
           </Table>
         </TableContainer>
 
-        <Typography sx={{ mt: 1.5, color: "#64748B", fontSize: "0.85rem" }}>
-          Mostrando {reservas.length} reserva{reservas.length === 1 ? "" : "s"} agendada
+        <Typography
+          sx={{
+            mt: 1.5,
+            color: "#64748B",
+            fontSize: "0.85rem",
+          }}
+        >
+          Mostrando {reservas.length} reserva
+          {reservas.length === 1 ? "" : "s"} agendada
           {reservas.length === 1 ? "" : "s"}
         </Typography>
       </Box>
-      <ModalExportar
+
+      {/* Modal independiente de exportación de Agenda */}
+      <ModalExportarAgenda
         open={modalExportar}
         onClose={() => setModalExportar(false)}
         onExportar={handleExportar}

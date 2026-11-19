@@ -5,11 +5,13 @@
 
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:6001/api";
 
+
 async function solicitar<T>(ruta: string, opciones?: RequestInit): Promise<T> {
   const respuesta = await fetch(`${API_URL}${ruta}`, {
     ...opciones,
     headers: {
       "Content-Type": "application/json",
+      "ngrok-skip-browser-warning": "true",
       ...opciones?.headers,
     },
   });
@@ -25,6 +27,7 @@ async function solicitar<T>(ruta: string, opciones?: RequestInit): Promise<T> {
 
   return datos as T;
 }
+
 
 /**
  * Lista la agenda (solo aprobadas vigentes según el backend).

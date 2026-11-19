@@ -1,3 +1,4 @@
+
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:6001/api";
 
 async function solicitar<T>(ruta: string, opciones?: RequestInit): Promise<T> {
@@ -5,6 +6,7 @@ async function solicitar<T>(ruta: string, opciones?: RequestInit): Promise<T> {
     ...opciones,
     headers: {
       "Content-Type": "application/json",
+      "ngrok-skip-browser-warning": "true",
       ...opciones?.headers,
     },
   });
@@ -21,15 +23,46 @@ async function solicitar<T>(ruta: string, opciones?: RequestInit): Promise<T> {
   return datos as T;
 }
 
+export interface ReservaHistorial {
+  id: number;
+  codigo: string;
+  fecha: string;
+  hora_inicio: string;
+  hora_fin: string;
+  estado: string;
+  fecha_registro: string;
+  fecha_actualizacion: string;
+
+  solicitante: string;
+  tipo: string;
+
+  id_dependencia: number | null;
+  dependencia: string | null;
+
+  id_facultad: number | null;
+  facultad: string | null;
+
+  id_programa: number | null;
+  programa: string | null;
+
+  espacio: string;
+  campus: string;
+}
+
 export async function listarHistorialReservas(
   filtros: Record<string, string> = {}
-) {
+): Promise<ReservaHistorial[]> {
   const params = new URLSearchParams();
+
   Object.entries(filtros).forEach(([key, value]) => {
     if (value) params.set(key, value);
   });
+
   const query = params.toString();
-  return solicitar<any[]>(`/historial/reservas${query ? `?${query}` : ""}`);
+
+  return solicitar<ReservaHistorial[]>(
+    `/historial/reservas${query ? `?${query}` : ""}`
+  );
 }
 
 export async function listarHistorialCeremonias(
@@ -37,15 +70,16 @@ export async function listarHistorialCeremonias(
 ) {
   const params = new URLSearchParams();
   params.set("estado", "Finalizada");
+
   if (filtros.nombre) params.set("nombre", filtros.nombre);
   if (filtros.fecha) params.set("fecha", filtros.fecha);
 
   const resultado = await solicitar<{ data: any[]; total: number }>(
     `/ceremonias?${params.toString()}`
   );
+
   return resultado.data || [];
 }
-
 
 export async function getReservaHistoricaById(id: string | number) {
   const data = await solicitar<any>(`/reservas/${id}`);
@@ -75,7 +109,15 @@ export async function getReservaHistoricaById(id: string | number) {
     ingresosRegistrados: 0,
 
     // Datos completos de la reserva
-    solicitante: data.solicitante,
+    solicitante: data.solicitante
+      ? {
+          ...data.solicitante,
+          dependencia: data.solicitante.dependencia || null,
+          facultad: data.solicitante.facultad || null,
+          programa: data.solicitante.programa || null,
+        }
+      : null,
+
     hora_inicio: data.hora_inicio,
     hora_fin: data.hora_fin,
     fecha_inicio: data.fecha_inicio,
@@ -115,9 +157,13 @@ export async function getCeremoniaById(id: string | number) {
 }
 
 export async function obtenerProgramasCatalogo() {
-  const data = await solicitar<{ programas: { id_programa?: number; id?: number; nombre: string }[] }>(
-    `/reservas/catalogos-institucionales`
-  );
+  const data = await solicitar<{
+    programas: {
+      id_programa?: number;
+      id?: number;
+      nombre: string;
+    }[];
+  }>(`/reservas/catalogos-institucionales`);
 
   return (data.programas || []).map((p) => ({
     id: p.id_programa ?? p.id ?? 0,

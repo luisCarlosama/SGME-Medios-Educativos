@@ -73,7 +73,7 @@ app.get('/api/health/db', async (req, res) => {
 }
 });
 
-app.listen(PORT, () => {
-  console.log(`Backend ejecutándose en http://localhost:${PORT}`);
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`Backend SGME ejecutándose en el puerto ${PORT}`);
   iniciarAutomatizacionEstadosSesiones();
 });

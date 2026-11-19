@@ -1,3 +1,4 @@
+
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
@@ -21,7 +22,9 @@ import {
   Typography,
   Alert,
 } from "@mui/material";
+
 import AdminLayout from "../../../../components/layout/AdminLayout";
+
 import {
   listarHistorialReservas,
   listarHistorialCeremonias,
@@ -55,11 +58,12 @@ const ANIOS = [
   { value: "2024", label: "2024" },
 ];
 
-
 function formatearFecha(fecha: string): string {
   if (!fecha) return "—";
+
   const solo = fecha.split("T")[0];
   const [anio, mes, dia] = solo.split("-");
+
   return `${dia}/${mes}/${anio}`;
 }
 
@@ -77,12 +81,14 @@ const tdSx = {
   py: 1.5,
   px: 1.5,
   borderBottom: "1px solid #F1F5F9",
+  overflow: "hidden",
+  textOverflow: "ellipsis",
 };
 
 export default function Historial() {
   const navigate = useNavigate();
-  const [tab, setTab] = useState<TabType>("reservas");
 
+  const [tab, setTab] = useState<TabType>("reservas");
   const [registros, setRegistros] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -93,8 +99,10 @@ export default function Historial() {
   const [mes, setMes] = useState("");
   const [programa, setPrograma] = useState("");
   const [codigoCeremonia, setCodigoCeremonia] = useState("");
-  const [programas, setProgramas] = useState<{ id: number; nombre: string }[]>([]);
 
+  const [programas, setProgramas] = useState<
+    { id: number; nombre: string }[]
+  >([]);
 
   const cargarDatos = async (limpiar = false) => {
     setLoading(true);
@@ -114,36 +122,45 @@ export default function Historial() {
         if (programaFiltro) filtros.programa = programaFiltro;
 
         const data = await listarHistorialReservas(filtros);
-
         const ahora = new Date();
 
-        const filtrados = (Array.isArray(data) ? data : []).filter((r: any) => {
-          // Rechazadas y Canceladas siempre van a historial
-          if (r.estado === "Rechazada" || r.estado === "Cancelada") {
-            return true;
+        const filtrados = (Array.isArray(data) ? data : []).filter(
+          (r: any) => {
+            // Rechazadas y canceladas siempre aparecen en el historial.
+            if (
+              r.estado === "Rechazada" ||
+              r.estado === "Cancelada"
+            ) {
+              return true;
+            }
+
+            // Se conserva la compatibilidad si existe el estado Vencida.
+            if (r.estado === "Vencida") {
+              return true;
+            }
+
+            // Las aprobadas aparecen cuando ya terminó su horario.
+            if (r.estado === "Aprobada") {
+              const fecha = r.fecha || r.fecha_inicio || "";
+              const horaFin = r.hora_fin || "23:59:59";
+
+              const fechaFin = new Date(
+                `${fecha.split("T")[0]}T${horaFin}`
+              );
+
+              if (isNaN(fechaFin.getTime())) return false;
+
+              return fechaFin < ahora;
+            }
+
+            // Finalizada se conserva como estado histórico gestionado.
+            if (r.estado === "Finalizada") {
+              return true;
+            }
+
+            return false;
           }
-
-          // Vencidas (si existe ese estado)
-          if (r.estado === "Vencida") {
-            return true;
-          }
-
-          // Aprobadas solo si YA TERMINÓ el horario
-          if (r.estado === "Aprobada") {
-            const fecha = r.fecha || r.fecha_inicio || "";
-            const horaFin = r.hora_fin || "23:59:59";
-
-            // Construye la fecha+hora de finalización
-            const fechaFin = new Date(`${fecha.split("T")[0]}T${horaFin}`);
-
-            // Si no se pudo parsear la fecha, no la mostramos
-            if (isNaN(fechaFin.getTime())) return false;
-
-            return fechaFin < ahora; // ya terminó → historial
-          }
-
-          return false;
-        });
+        );
 
         setRegistros(filtrados);
       } else {
@@ -159,6 +176,7 @@ export default function Historial() {
         if (mesFiltro) {
           filtrados = filtrados.filter((c: any) => {
             const f = String(c.fechaISO || c.fecha || "");
+
             return (
               f.includes(`-${mesFiltro}-`) ||
               f.includes(`/${mesFiltro}/`)
@@ -180,7 +198,9 @@ export default function Historial() {
           const codigo = codigoFiltro.trim().toLowerCase();
 
           filtrados = filtrados.filter((c: any) =>
-            String(c.codigo || "").toLowerCase().includes(codigo)
+            String(c.codigo || "")
+              .toLowerCase()
+              .includes(codigo)
           );
         }
 
@@ -188,14 +208,16 @@ export default function Historial() {
       }
     } catch (err: unknown) {
       setError(
-        err instanceof Error ? err.message : "No se pudo cargar el historial."
+        err instanceof Error
+          ? err.message
+          : "No se pudo cargar el historial."
       );
+
       setRegistros([]);
     } finally {
       setLoading(false);
     }
   };
-
 
   useEffect(() => {
     cargarDatos();
@@ -219,38 +241,38 @@ export default function Historial() {
     cargarDatos(true);
   };
 
-
   const handleExportar = (formato: "xlsx" | "pdf") => {
     if (!registros.length) {
       alert("No hay registros para exportar.");
       return;
     }
 
-    // "registros" contiene los resultados de la pestaña activa
-    // después de aplicar los filtros de búsqueda.
     const filas =
       tab === "reservas"
         ? registros.map((r, i) => ({
-          "N°": i + 1,
-          Código: r.codigo ?? "—",
-          Fecha: formatearFecha(r.fecha || r.fecha_inicio),
-          Solicitante: r.solicitante ?? "—",
-          Tipo: r.tipo ?? "—",
-          Programa: r.programa ?? "—",
-          Espacio: r.espacio ?? "—",
-          Campus: r.campus ?? "—",
-          Estado: r.estado ?? "—",
-        }))
+            "N°": i + 1,
+            Código: r.codigo ?? "—",
+            Fecha: formatearFecha(r.fecha || r.fecha_inicio),
+            Solicitante: r.solicitante ?? "—",
+            Tipo: r.tipo ?? "—",
+            Dependencia: r.dependencia ?? "—",
+            Facultad: r.facultad ?? "—",
+            Programa: r.programa ?? "—",
+            Espacio: r.espacio ?? "—",
+            Campus: r.campus ?? "—",
+            Estado: r.estado ?? "—",
+          }))
         : registros.map((c, i) => ({
-          "N°": i + 1,
-          Código: c.codigo ?? "—",
-          Ceremonia: c.nombre ?? "—",
-          Fecha: c.fecha ?? c.fechaISO ?? "—",
-          Programas: c.programas ?? "—",
-          Estado: c.estado ?? "—",
-        }));
+            "N°": i + 1,
+            Código: c.codigo ?? "—",
+            Ceremonia: c.nombre ?? "—",
+            Fecha: c.fecha ?? c.fechaISO ?? "—",
+            Programas: c.programas ?? "—",
+            Estado: c.estado ?? "—",
+          }));
 
     const ahora = new Date();
+
     const fechaGen = [
       ahora.getFullYear(),
       String(ahora.getMonth() + 1).padStart(2, "0"),
@@ -258,18 +280,24 @@ export default function Historial() {
     ].join("-");
 
     const nombreHoja = tab === "reservas" ? "Reservas" : "Ceremonias";
+
     const nombreArchivo =
-      tab === "reservas" ? "SGME_Historial_Reservas" : "SGME_Historial_Ceremonias";
+      tab === "reservas"
+        ? "SGME_Historial_Reservas"
+        : "SGME_Historial_Ceremonias";
 
     if (formato === "xlsx") {
       const wb = XLSX.utils.book_new();
       const ws = XLSX.utils.json_to_sheet(filas);
+
       XLSX.utils.book_append_sheet(wb, ws, nombreHoja);
       XLSX.writeFile(wb, `${nombreArchivo}_${fechaGen}.xlsx`);
+
       return;
     }
 
     const doc = new jsPDF({ orientation: "landscape" });
+
     const titulo =
       tab === "reservas"
         ? "SGME - Historial de reservas"
@@ -277,6 +305,7 @@ export default function Historial() {
 
     doc.setFontSize(14);
     doc.text(titulo, 14, 15);
+
     doc.setFontSize(9);
     doc.text(`Generado: ${ahora.toLocaleString("es-CO")}`, 14, 22);
     doc.text(`Registros exportados: ${filas.length}`, 14, 27);
@@ -284,14 +313,22 @@ export default function Historial() {
     autoTable(doc, {
       startY: 32,
       head: [Object.keys(filas[0])],
-      body: filas.map((f) => Object.values(f).map((v) => String(v ?? ""))),
-      styles: { fontSize: 7, cellPadding: 2 },
-      headStyles: { fillColor: [30, 58, 95] },
+      body: filas.map((f) =>
+        Object.values(f).map((v) => String(v ?? ""))
+      ),
+      styles: {
+        fontSize: 7,
+        cellPadding: 2,
+      },
+      headStyles: {
+        fillColor: [30, 58, 95],
+      },
     });
 
     doc.save(`${nombreArchivo}_${fechaGen}.pdf`);
   };
 
+  const numeroColumnas = tab === "reservas" ? 8 : 6;
 
   return (
     <AdminLayout>
@@ -319,13 +356,13 @@ export default function Historial() {
                 ? "Historial de reservas"
                 : "Historial de ceremonias"}
             </Typography>
+
             <Typography sx={{ color: "#64748B", fontSize: "0.95rem" }}>
               {tab === "reservas"
                 ? "Consulta y exporta el historial de solicitudes y reservas gestionadas."
                 : "Consulta y gestiona el repositorio histórico de ceremonias finalizadas."}
             </Typography>
           </Box>
-
 
           <Button
             variant="contained"
@@ -337,12 +374,14 @@ export default function Historial() {
               borderRadius: "8px",
               px: 2.5,
               boxShadow: "none",
-              "&:hover": { backgroundColor: "#0F2744", boxShadow: "none" },
+              "&:hover": {
+                backgroundColor: "#0F2744",
+                boxShadow: "none",
+              },
             }}
           >
             Exportar
           </Button>
-
         </Box>
 
         <Box
@@ -363,17 +402,20 @@ export default function Historial() {
               fontWeight: 600,
               borderRadius: "10px",
               py: 1.2,
-              backgroundColor: tab === "reservas" ? "#1E3A5F" : "transparent",
+              backgroundColor:
+                tab === "reservas" ? "#1E3A5F" : "transparent",
               color: tab === "reservas" ? "#FFFFFF" : "#64748B",
               boxShadow: "none",
               "&:hover": {
-                backgroundColor: tab === "reservas" ? "#1E3A5F" : "#E2E8F0",
+                backgroundColor:
+                  tab === "reservas" ? "#1E3A5F" : "#E2E8F0",
                 boxShadow: "none",
               },
             }}
           >
             Reservas
           </Button>
+
           <Button
             fullWidth
             onClick={() => setTab("ceremonias")}
@@ -382,11 +424,13 @@ export default function Historial() {
               fontWeight: 600,
               borderRadius: "10px",
               py: 1.2,
-              backgroundColor: tab === "ceremonias" ? "#1E3A5F" : "transparent",
+              backgroundColor:
+                tab === "ceremonias" ? "#1E3A5F" : "transparent",
               color: tab === "ceremonias" ? "#FFFFFF" : "#64748B",
               boxShadow: "none",
               "&:hover": {
-                backgroundColor: tab === "ceremonias" ? "#1E3A5F" : "#E2E8F0",
+                backgroundColor:
+                  tab === "ceremonias" ? "#1E3A5F" : "#E2E8F0",
                 boxShadow: "none",
               },
             }}
@@ -405,7 +449,12 @@ export default function Historial() {
           }}
         >
           <Typography
-            sx={{ fontWeight: 700, fontSize: "1rem", color: "#0F172A", mb: 2 }}
+            sx={{
+              fontWeight: 700,
+              fontSize: "1rem",
+              color: "#0F172A",
+              mb: 2,
+            }}
           >
             Consultar historial
           </Typography>
@@ -457,6 +506,7 @@ export default function Historial() {
               sx={{ minWidth: 180 }}
             >
               <MenuItem value="">Todos los programas</MenuItem>
+
               {programas.map((p) => (
                 <MenuItem key={p.id} value={p.nombre}>
                   {p.nombre}
@@ -485,7 +535,10 @@ export default function Historial() {
                 borderRadius: "8px",
                 px: 2.5,
                 boxShadow: "none",
-                "&:hover": { backgroundColor: "#0F2744", boxShadow: "none" },
+                "&:hover": {
+                  backgroundColor: "#0F2744",
+                  boxShadow: "none",
+                },
               }}
             >
               Buscar
@@ -494,7 +547,10 @@ export default function Historial() {
             <Button
               variant="text"
               onClick={handleLimpiar}
-              sx={{ textTransform: "none", color: "#64748B" }}
+              sx={{
+                textTransform: "none",
+                color: "#64748B",
+              }}
             >
               Limpiar filtros
             </Button>
@@ -525,16 +581,24 @@ export default function Historial() {
             backgroundColor: "#FFFFFF",
             borderRadius: "12px",
             border: "1px solid #E2E8F0",
-            overflow: "hidden",
+            overflowX: "auto",
           }}
         >
-          <Table sx={{ width: "100%", tableLayout: "fixed" }}>
+          <Table
+            sx={{
+              width: "100%",
+              minWidth: tab === "reservas" ? 1150 : 800,
+              tableLayout: "fixed",
+            }}
+          >
             <TableHead>
               <TableRow sx={{ backgroundColor: "#F8FAFC" }}>
                 {tab === "reservas" ? (
                   <>
                     <TableCell sx={thSx}>Código</TableCell>
                     <TableCell sx={thSx}>Fecha</TableCell>
+                    <TableCell sx={thSx}>Dependencia</TableCell>
+                    <TableCell sx={thSx}>Facultad</TableCell>
                     <TableCell sx={thSx}>Programa</TableCell>
                     <TableCell sx={thSx}>Espacio</TableCell>
                     <TableCell sx={thSx}>Estado</TableCell>
@@ -556,15 +620,22 @@ export default function Historial() {
             <TableBody>
               {loading ? (
                 <TableRow>
-                  <TableCell colSpan={6} sx={{ textAlign: "center", py: 5 }}>
+                  <TableCell
+                    colSpan={numeroColumnas}
+                    sx={{ textAlign: "center", py: 5 }}
+                  >
                     <CircularProgress size={26} />
                   </TableCell>
                 </TableRow>
               ) : registros.length === 0 ? (
                 <TableRow>
                   <TableCell
-                    colSpan={6}
-                    sx={{ textAlign: "center", py: 5, color: "#64748B" }}
+                    colSpan={numeroColumnas}
+                    sx={{
+                      textAlign: "center",
+                      py: 5,
+                      color: "#64748B",
+                    }}
                   >
                     No se encontraron registros.
                   </TableCell>
@@ -573,14 +644,34 @@ export default function Historial() {
                 registros.map((r) => (
                   <TableRow
                     key={r.id}
-                    sx={{ "&:hover": { backgroundColor: "#F8FAFC" } }}
+                    sx={{
+                      "&:hover": {
+                        backgroundColor: "#F8FAFC",
+                      },
+                    }}
                   >
-                    <TableCell sx={tdSx}>{r.codigo}</TableCell>
+                    <TableCell sx={tdSx}>{r.codigo || "—"}</TableCell>
+
                     <TableCell sx={tdSx}>
                       {formatearFecha(r.fecha || r.fecha_inicio)}
                     </TableCell>
-                    <TableCell sx={tdSx}>{r.programa || "—"}</TableCell>
-                    <TableCell sx={tdSx}>{r.espacio || "—"}</TableCell>
+
+                    <TableCell sx={tdSx} title={r.dependencia || ""}>
+                      {r.dependencia || "—"}
+                    </TableCell>
+
+                    <TableCell sx={tdSx} title={r.facultad || ""}>
+                      {r.facultad || "—"}
+                    </TableCell>
+
+                    <TableCell sx={tdSx} title={r.programa || ""}>
+                      {r.programa || "—"}
+                    </TableCell>
+
+                    <TableCell sx={tdSx} title={r.espacio || ""}>
+                      {r.espacio || "—"}
+                    </TableCell>
+
                     <TableCell sx={tdSx}>
                       <Chip
                         label={r.estado}
@@ -594,6 +685,7 @@ export default function Historial() {
                         }}
                       />
                     </TableCell>
+
                     <TableCell sx={tdSx}>
                       <Button
                         size="small"
@@ -604,6 +696,7 @@ export default function Historial() {
                           textTransform: "none",
                           fontWeight: 600,
                           color: "#2563EB",
+                          whiteSpace: "nowrap",
                         }}
                       >
                         Ver detalle →
@@ -615,12 +708,19 @@ export default function Historial() {
                 registros.map((c) => (
                   <TableRow
                     key={c.id}
-                    sx={{ "&:hover": { backgroundColor: "#F8FAFC" } }}
+                    sx={{
+                      "&:hover": {
+                        backgroundColor: "#F8FAFC",
+                      },
+                    }}
                   >
                     <TableCell sx={tdSx}>{c.codigo}</TableCell>
                     <TableCell sx={tdSx}>{c.nombre}</TableCell>
                     <TableCell sx={tdSx}>{c.fecha}</TableCell>
-                    <TableCell sx={tdSx}>{c.programas || "—"}</TableCell>
+                    <TableCell sx={tdSx}>
+                      {c.programas || "—"}
+                    </TableCell>
+
                     <TableCell sx={tdSx}>
                       <Chip
                         label={c.estado}
@@ -634,6 +734,7 @@ export default function Historial() {
                         }}
                       />
                     </TableCell>
+
                     <TableCell sx={tdSx}>
                       <Button
                         size="small"
@@ -656,11 +757,18 @@ export default function Historial() {
           </Table>
         </TableContainer>
 
-        <Typography sx={{ color: "#94A3B8", fontSize: "0.8rem", mt: 2 }}>
+        <Typography
+          sx={{
+            color: "#94A3B8",
+            fontSize: "0.8rem",
+            mt: 2,
+          }}
+        >
           Los registros históricos se conservan para consulta y no se editan
           desde este repositorio.
         </Typography>
       </Box>
+
       <ModalExportarHistorial
         open={modalExportar}
         onClose={() => setModalExportar(false)}
@@ -671,4 +779,3 @@ export default function Historial() {
     </AdminLayout>
   );
 }
-

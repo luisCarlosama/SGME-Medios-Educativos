@@ -9,6 +9,10 @@ import {
     Paper,
     TextField,
     Typography,
+    Dialog,
+    DialogTitle,
+    DialogContent,
+    DialogActions,
 } from "@mui/material";
 import ArrowBackIcon from "@mui/icons-material/ArrowBack";
 import AdminLayout from "../../../../components/layout/AdminLayout";
@@ -40,7 +44,13 @@ export default function RechazarSolicitud() {
     const [accion, setAccion] = useState<"Rechazada" | "Cancelada">("Rechazada");
     const [motivo, setMotivo] = useState("");
     const [enviando, setEnviando] = useState(false);
-    const [exito, setExito] = useState(false);
+    const [dialogoNotificacion, setDialogoNotificacion] = useState(false);
+
+    const [resultadoNotificacion, setResultadoNotificacion] = useState<{
+        enviada: boolean;
+        simulado: boolean;
+        correo: string | null;
+    } | null>(null);
 
     useEffect(() => {
         if (!id) return;
@@ -57,6 +67,7 @@ export default function RechazarSolicitud() {
             .finally(() => setLoading(false));
     }, [id]);
 
+
     const handleConfirmar = async () => {
         if (!id) return;
 
@@ -69,10 +80,27 @@ export default function RechazarSolicitud() {
         setError("");
 
         try {
-            await actualizarEstadoSolicitud(id, accion, motivo.trim());
-            setExito(true);
+            const respuesta = await actualizarEstadoSolicitud(
+                id,
+                accion,
+                motivo.trim()
+            );
+
+            // Admite tanto respuesta directa como respuesta Axios.
+            const notificacion =
+                respuesta?.notificacion ??
+                respuesta?.data?.notificacion ??
+                null;
+
+            setResultadoNotificacion(notificacion);
+            setDialogoNotificacion(true);
+
         } catch (err: unknown) {
-            setError(err instanceof Error ? err.message : "No se pudo procesar la solicitud.");
+            setError(
+                err instanceof Error
+                    ? err.message
+                    : "No se pudo procesar la solicitud."
+            );
         } finally {
             setEnviando(false);
         }
@@ -101,30 +129,11 @@ export default function RechazarSolicitud() {
         );
     }
 
-    if (exito) {
-        return (
-            <AdminLayout>
-                <Box sx={{ maxWidth: 560, mx: "auto", py: 8, textAlign: "center" }}>
-                    <Alert severity="success" sx={{ mb: 3, textAlign: "left" }}>
-                        La solicitud fue {accion === "Rechazada" ? "rechazada" : "cancelada"} correctamente.
-                        El solicitante será notificado por correo.
-                    </Alert>
-                    <Button
-                        variant="contained"
-                        onClick={() => navigate(`/admin/solicitudes/${id}`)}
-                        sx={{ textTransform: "none", borderRadius: "8px" }}
-                    >
-                        Volver al detalle
-                    </Button>
-                </Box>
-            </AdminLayout>
-        );
-    }
-
     const esInterno = solicitud?.solicitante?.tipo === "interno";
     const tipoTexto = esInterno ? "Solicitud institucional" : "Solicitud externa";
 
     return (
+
         <AdminLayout>
             <Box
                 sx={{
@@ -326,6 +335,72 @@ export default function RechazarSolicitud() {
                     </Box>
                 </Paper>
             </Box>
+
+            <Dialog
+                open={dialogoNotificacion}
+                onClose={() => setDialogoNotificacion(false)}
+                maxWidth="sm"
+                fullWidth
+            >
+                <DialogTitle sx={{ fontWeight: 700, color: "#0F172A" }}>
+                    Resultado de la notificación
+                </DialogTitle>
+
+                <DialogContent>
+                    {resultadoNotificacion?.enviada &&
+                        !resultadoNotificacion?.simulado ? (
+                        <Alert severity="success" sx={{ mb: 2 }}>
+                            El correo electrónico fue enviado correctamente.
+                        </Alert>
+                    ) : resultadoNotificacion?.simulado ? (
+                        <Alert severity="info" sx={{ mb: 2 }}>
+                            La solicitud fue procesada correctamente, pero el correo
+                            solamente fue simulado. No se realizó un envío real.
+                        </Alert>
+                    ) : !resultadoNotificacion?.correo ? (
+                        <Alert severity="warning" sx={{ mb: 2 }}>
+                            La solicitud fue procesada, pero el solicitante no tiene
+                            un correo electrónico registrado.
+                        </Alert>
+                    ) : (
+                        <Alert severity="error" sx={{ mb: 2 }}>
+                            La solicitud fue procesada, pero no fue posible enviar
+                            el correo electrónico.
+                        </Alert>
+                    )}
+
+                    <Typography sx={{ fontSize: "0.95rem", color: "#334155", mb: 1 }}>
+                        <strong>Acción realizada:</strong>{" "}
+                        {accion === "Rechazada" ? "Rechazo" : "Cancelación"}
+                    </Typography>
+
+                    <Typography sx={{ fontSize: "0.95rem", color: "#334155" }}>
+                        <strong>Destinatario:</strong>{" "}
+                        {resultadoNotificacion?.correo || "No registrado"}
+                    </Typography>
+                </DialogContent>
+
+                <DialogActions sx={{ p: 2.5 }}>
+                    <Button
+                        variant="contained"
+                        onClick={() => {
+                            setDialogoNotificacion(false);
+                            navigate(`/admin/solicitudes/${id}`);
+                        }}
+                        sx={{
+                            textTransform: "none",
+                            borderRadius: "8px",
+                            backgroundColor: "#1E3A5F",
+                            "&:hover": {
+                                backgroundColor: "#172F4D",
+                            },
+                        }}
+                    >
+                        Volver al detalle
+                    </Button>
+                </DialogActions>
+            </Dialog>
+
         </AdminLayout>
     );
 }

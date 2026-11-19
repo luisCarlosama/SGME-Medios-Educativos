@@ -14,6 +14,10 @@ import {
     Stack,
     TextField,
     Typography,
+    Dialog,
+    DialogTitle,
+    DialogContent,
+    DialogActions,
 } from "@mui/material";
 import SearchIcon from "@mui/icons-material/Search";
 import HomeOutlinedIcon from "@mui/icons-material/HomeOutlined";
@@ -28,6 +32,8 @@ import {
     obtenerCampus,
     obtenerEspacios,
     consultarDisponibilidad,
+    obtenerAgendaDia,
+    obtenerAgendaMes,
 } from "./services/reservas.service";
 
 const AZUL = "#0F2744";
@@ -62,6 +68,8 @@ export default function ConsultaDisponibilidad() {
     const [campus, setCampus] = useState([]);
     const [espacios, setEspacios] = useState([]);
 
+    const [modalConsultaAbierto, setModalConsultaAbierto] = useState(false);
+
     const [idCampus, setIdCampus] = useState("");
     const [idEspacio, setIdEspacio] = useState("");
     const [fecha, setFecha] = useState(fechaLocalActual());
@@ -77,6 +85,16 @@ export default function ConsultaDisponibilidad() {
 
     const [modalAbierto, setModalAbierto] = useState(false);
     const [fechaCalendario, setFechaCalendario] = useState("");
+
+    // Estados del calendario
+    const [mesVisible, setMesVisible] = useState(() => {
+        const hoy = new Date();
+        return new Date(hoy.getFullYear(), hoy.getMonth(), 1);
+    });
+
+    const [reservasMes, setReservasMes] = useState([]);
+    const [cargandoCalendario, setCargandoCalendario] = useState(false);
+    const [errorCalendario, setErrorCalendario] = useState("");
 
     useEffect(() => {
         async function cargarCampus() {
@@ -119,6 +137,102 @@ export default function ConsultaDisponibilidad() {
         cargarEspacios();
     }, [idCampus]);
 
+
+    useEffect(() => {
+        let cancelado = false;
+
+        async function cargarOcupacionMensual() {
+            if (!idEspacio) {
+                setReservasMes([]);
+                setCargandoCalendario(false);
+                setErrorCalendario("");
+                return;
+            }
+
+            try {
+                setCargandoCalendario(true);
+                setErrorCalendario("");
+
+                const datos = await obtenerAgendaMes(
+                    Number(idEspacio),
+                    mesVisible.getFullYear(),
+                    mesVisible.getMonth() + 1
+                );
+                console.log("RESPUESTA AGENDA MENSUAL:", datos);
+                console.log("RESERVAS RECIBIDAS:", datos.reservas);
+
+                console.log(
+                    "DATOS COMPLETOS DE AGENDA MENSUAL:",
+                    JSON.stringify(datos, null, 2)
+                );
+
+                console.log(
+                    "FECHAS DE RESERVAS:",
+                    datos.reservas?.map((reserva) => ({
+                        id_solicitud: reserva.id_solicitud,
+                        fecha_inicio: reserva.fecha_inicio,
+                        fecha_fin: reserva.fecha_fin,
+                        hora_inicio: reserva.hora_inicio,
+                        hora_fin: reserva.hora_fin,
+                        es_recurrente: reserva.es_recurrente,
+                    }))
+                );
+
+                if (!cancelado) {
+                    setReservasMes(
+                        Array.isArray(datos.reservas)
+                            ? datos.reservas
+                            : []
+                    );
+                }
+            } catch (err) {
+                if (!cancelado) {
+                    setReservasMes([]);
+                    setErrorCalendario(
+                        err.message ||
+                        "No fue posible consultar la ocupación mensual."
+                    );
+                }
+            } finally {
+                if (!cancelado) {
+                    setCargandoCalendario(false);
+                }
+            }
+        }
+
+        cargarOcupacionMensual();
+
+        return () => {
+            cancelado = true;
+        };
+    }, [idEspacio, mesVisible]);
+
+    useEffect(() => {
+        if (!fecha) return;
+
+        const hoy = new Date();
+        const mesActual = new Date(
+            hoy.getFullYear(),
+            hoy.getMonth(),
+            1
+        );
+
+        const fechaSeleccionada = new Date(`${fecha}T12:00:00`);
+
+        let mesDestino = new Date(
+            fechaSeleccionada.getFullYear(),
+            fechaSeleccionada.getMonth(),
+            1
+        );
+
+        // Nunca mostrar un mes anterior al actual.
+        if (mesDestino < mesActual) {
+            mesDestino = mesActual;
+        }
+
+        setMesVisible(mesDestino);
+    }, [fecha]);
+
     async function buscarDisponibilidad() {
         setError("");
         setBusquedaRealizada(false);
@@ -147,13 +261,37 @@ export default function ConsultaDisponibilidad() {
             });
             setResultadoDisponibilidad(resultado);
             setBusquedaRealizada(true);
+            setModalConsultaAbierto(true);
         } catch (err) {
             setError(err.message || "No fue posible consultar la disponibilidad.");
         } finally {
             setConsultando(false);
         }
     }
+    function irAlCalendario() {
+        // Mostrar en el calendario el mes de la fecha consultada.
+        const fechaConsultada = new Date(`${fecha}T12:00:00`);
+        setMesVisible(
+            new Date(
+                fechaConsultada.getFullYear(),
+                fechaConsultada.getMonth(),
+                1
+            )
+        );
 
+        // Cerrar el resultado de disponibilidad.
+        setModalConsultaAbierto(false);
+
+        // Desplazarse hasta el calendario.
+        setTimeout(() => {
+            document
+                .getElementById("calendario-disponibilidad")
+                ?.scrollIntoView({
+                    behavior: "smooth",
+                    block: "start",
+                });
+        }, 150);
+    }
     function limpiarFiltros() {
         setIdCampus("");
         setIdEspacio("");
@@ -164,12 +302,6 @@ export default function ConsultaDisponibilidad() {
         setResultadoDisponibilidad(null);
         setError("");
     }
-
-
-    const [mesVisible, setMesVisible] = useState(() => {
-        const hoy = new Date();
-        return new Date(hoy.getFullYear(), hoy.getMonth(), 1);
-    });
 
     const diasCalendario = (() => {
         const anio = mesVisible.getFullYear();
@@ -198,21 +330,110 @@ export default function ConsultaDisponibilidad() {
     });
 
     const cambiarMes = (cantidad) => {
-        setMesVisible(
-            (actual) =>
-                new Date(
-                    actual.getFullYear(),
-                    actual.getMonth() + cantidad,
-                    1
-                )
-        );
+        setMesVisible((actual) => {
+            const siguiente = new Date(
+                actual.getFullYear(),
+                actual.getMonth() + cantidad,
+                1
+            );
+
+            const hoy = new Date();
+            const mesActual = new Date(
+                hoy.getFullYear(),
+                hoy.getMonth(),
+                1
+            );
+
+            // Si todavía no se ha realizado una consulta exitosa,
+            // no permitir avanzar más allá del mes actual.
+            const fechaLimite = fechaLimiteCalendario
+                ? new Date(`${fechaLimiteCalendario}T12:00:00`)
+                : hoy;
+
+            const mesLimite = new Date(
+                fechaLimite.getFullYear(),
+                fechaLimite.getMonth(),
+                1
+            );
+
+            // No permitir navegar antes del mes actual.
+            if (siguiente < mesActual) {
+                return actual;
+            }
+
+            // No permitir navegar después del mes consultado.
+            if (siguiente > mesLimite) {
+                return actual;
+            }
+
+            return siguiente;
+        });
     };
 
-
     const colorDia = (estado) => {
-        if (estado === "verde") return { bg: "#D1FAE5", color: "#065F46" };
-        if (estado === "rojo") return { bg: "#FEE2E2", color: "#991B1B" };
-        return { bg: "#F1F5F9", color: "#64748B" };
+        if (estado === "verde") {
+            return {
+                bg: "#D1FAE5",
+                color: "#065F46",
+                border: "1px solid #A7F3D0",
+            };
+        }
+
+        if (estado === "rojo") {
+            return {
+                bg: "#FCA5A5",
+                color: "#7F1D1D",
+                border: "1px solid #DC2626",
+            };
+        }
+
+        return {
+            bg: "#F1F5F9",
+            color: "#64748B",
+            border: "1px solid #E2E8F0",
+        };
+    };
+
+    const obtenerEstadoDia = (dia) => {
+        if (!dia || !idEspacio || cargandoCalendario) {
+            return "gris";
+        }
+
+        const anio = mesVisible.getFullYear();
+        const mes = String(mesVisible.getMonth() + 1).padStart(2, "0");
+        const numeroDia = String(dia).padStart(2, "0");
+        const fechaDia = `${anio}-${mes}-${numeroDia}`;
+
+        // Los domingos no tienen disponibilidad.
+        const fechaObjeto = new Date(`${fechaDia}T12:00:00`);
+
+        if (fechaObjeto.getDay() === 0) {
+            return "gris";
+        }
+
+        // Las fechas anteriores no están disponibles para consulta.
+        if (fechaDia < fechaLocalActual()) {
+            return "gris";
+        }
+
+        // Verificar si una reserva aprobada ocupa este día.
+        const ocupado = reservasMes.some((reserva) => {
+            const inicio = reserva.fecha_inicio
+                ? String(reserva.fecha_inicio).slice(0, 10)
+                : "";
+
+            const fin = reserva.fecha_fin
+                ? String(reserva.fecha_fin).slice(0, 10)
+                : "";
+
+            if (!inicio || !fin) {
+                return false;
+            }
+
+            return inicio <= fechaDia && fin >= fechaDia;
+        });
+
+        return ocupado ? "rojo" : "verde";
     };
 
     return (
@@ -566,25 +787,12 @@ export default function ConsultaDisponibilidad() {
                     </CardContent>
                 </Card>
 
-                {/* Resultado de la consulta real */}
-                {busquedaRealizada && (
-                    <Box sx={{ mt: 3 }}>
-                        <Alert
-                            severity={resultadoDisponibilidad?.disponible ? "success" : "warning"}
-                            sx={{ borderRadius: "12px" }}
-                        >
-                            {resultadoDisponibilidad?.disponible
-                                ? "El espacio está disponible en la fecha y horario seleccionados."
-                                : "El espacio no está disponible en la fecha y horario seleccionados."}
-                        </Alert>
-                    </Box>
-                )}
-
-
                 {/* ========== CALENDARIO ========== */}
 
-                <Box sx={{ mt: 5, mb: 6, width: "100%" }}>
-
+                <Box
+                    id="calendario-disponibilidad"
+                    sx={{ mt: 5, mb: 6, width: "100%", scrollMarginTop: "90px" }}
+                >
                     <Box
                         sx={{
                             mt: 5,
@@ -656,6 +864,10 @@ export default function ConsultaDisponibilidad() {
                                     size="small"
                                     variant="outlined"
                                     onClick={() => cambiarMes(-1)}
+                                    disabled={
+                                        mesVisible.getFullYear() === new Date().getFullYear() &&
+                                        mesVisible.getMonth() === new Date().getMonth()
+                                    }
                                 >
                                     Mes anterior
                                 </Button>
@@ -664,6 +876,18 @@ export default function ConsultaDisponibilidad() {
                                     size="small"
                                     variant="outlined"
                                     onClick={() => cambiarMes(1)}
+                                    disabled={
+                                        (() => {
+                                            const limite = fecha
+                                                ? new Date(`${fecha}T12:00:00`)
+                                                : new Date();
+
+                                            return (
+                                                mesVisible.getFullYear() === limite.getFullYear() &&
+                                                mesVisible.getMonth() === limite.getMonth()
+                                            );
+                                        })()
+                                    }
                                 >
                                     Mes siguiente
                                 </Button>
@@ -706,37 +930,61 @@ export default function ConsultaDisponibilidad() {
                             >
 
                                 {diasCalendario.map((item) => {
-                                    if (item.tipo === "vacio") {
-                                        return <Box key={item.id} />;
-                                    }
+                                    const estado = item.dia
+                                        ? obtenerEstadoDia(item.dia)
+                                        : "gris";
+
+                                    const estilo = colorDia(estado);
+
+                                    const anio = mesVisible.getFullYear();
+                                    const mes = String(mesVisible.getMonth() + 1).padStart(2, "0");
+                                    const dia = String(item.dia).padStart(2, "0");
+
+                                    const fechaSeleccionada = `${anio}-${mes}-${dia}`;
+
+                                    const seleccionable =
+                                        Boolean(item.dia) &&
+                                        Boolean(idEspacio) &&
+                                        estado !== "gris" &&
+                                        !cargandoCalendario;
 
                                     return (
                                         <Box
                                             key={item.id}
                                             onClick={() => {
-                                                const anio = mesVisible.getFullYear();
-                                                const mes = String(mesVisible.getMonth() + 1).padStart(2, "0");
-                                                const dia = String(item.dia).padStart(2, "0");
+                                                if (!seleccionable) return;
 
-                                                setFechaCalendario(`${anio}-${mes}-${dia}`);
+                                                setFechaCalendario(fechaSeleccionada);
                                                 setModalAbierto(true);
                                             }}
+
                                             sx={{
-                                                bgcolor: "#F1F5F9",
-                                                color: "#64748B",
-                                                borderRadius: "8px",
-                                                py: 1.5,
-                                                textAlign: "center",
-                                                fontWeight: 600,
-                                                fontSize: "0.9rem",
-                                                cursor: "pointer",
-                                                transition: "transform 0.15s",
-                                                "&:hover": {
-                                                    transform: "scale(1.05)",
-                                                },
+                                                bgcolor: estilo.bg,
+                                                color: estilo.color,
+                                                border: estilo.border,
+                                                borderRadius: 2,
+                                                minHeight: 40,
+                                                display: "flex",
+                                                alignItems: "center",
+                                                justifyContent: "center",
+                                                fontWeight: estado === "rojo" ? 800 : 600,
+                                                cursor: seleccionable ? "pointer" : "default",
+                                                opacity: item.dia ? 1 : 0,
+                                                pointerEvents: item.dia ? "auto" : "none",
+                                                transition: "0.2s",
+                                                boxShadow: estado === "rojo"
+                                                    ? "0 1px 3px rgba(220, 38, 38, 0.18)"
+                                                    : "none",
+                                                "&:hover": seleccionable
+                                                    ? {
+                                                        filter: "brightness(0.94)",
+                                                        transform: "scale(1.04)",
+                                                    }
+                                                    : {},
                                             }}
+
                                         >
-                                            {item.dia}
+                                            {item.dia || ""}
                                         </Box>
                                     );
                                 })}
@@ -807,6 +1055,161 @@ export default function ConsultaDisponibilidad() {
                         </Card>
                     </Box>
                 </Box>
+                <Dialog
+                    open={modalConsultaAbierto}
+                    onClose={() => setModalConsultaAbierto(false)}
+                    fullWidth
+                    maxWidth="xs"
+                    PaperProps={{
+                        sx: {
+                            borderRadius: "16px",
+                            p: 1,
+                        },
+                    }}
+                >
+                    <DialogTitle
+                        sx={{
+                            color: AZUL,
+                            fontWeight: 700,
+                            fontSize: "1.2rem",
+                        }}
+                    >
+                        Resultado de disponibilidad
+                    </DialogTitle>
+
+                    <DialogContent>
+                        {resultadoDisponibilidad && (
+                            <Stack spacing={2}>
+                                <Alert
+                                    severity={
+                                        resultadoDisponibilidad.disponible
+                                            ? "success"
+                                            : "warning"
+                                    }
+                                    sx={{ borderRadius: "10px" }}
+                                >
+                                    {resultadoDisponibilidad.disponible
+                                        ? "El espacio está disponible en el horario seleccionado."
+                                        : "El espacio no está disponible en el horario seleccionado."}
+                                </Alert>
+
+                                <Box>
+                                    <Typography
+                                        sx={{
+                                            fontSize: "0.8rem",
+                                            color: "#64748B",
+                                            mb: 0.5,
+                                        }}
+                                    >
+                                        Fecha consultada
+                                    </Typography>
+
+                                    <Typography sx={{ fontWeight: 600, color: AZUL }}>
+                                        {fecha}
+                                    </Typography>
+                                </Box>
+
+                                <Box>
+                                    <Typography
+                                        sx={{
+                                            fontSize: "0.8rem",
+                                            color: "#64748B",
+                                            mb: 0.5,
+                                        }}
+                                    >
+                                        Franja horaria
+                                    </Typography>
+
+                                    <Typography sx={{ fontWeight: 600, color: AZUL }}>
+                                        {horaInicio} – {horaFin}
+                                    </Typography>
+                                </Box>
+
+                                <Box>
+                                    <Typography
+                                        sx={{
+                                            fontSize: "0.8rem",
+                                            color: "#64748B",
+                                            mb: 0.5,
+                                        }}
+                                    >
+                                        Estado
+                                    </Typography>
+
+                                    <Typography
+                                        sx={{
+                                            fontWeight: 700,
+                                            color: resultadoDisponibilidad.disponible
+                                                ? "#059669"
+                                                : "#DC2626",
+                                        }}
+                                    >
+                                        {resultadoDisponibilidad.disponible
+                                            ? "Disponible"
+                                            : "Reservado"}
+                                    </Typography>
+                                    {!resultadoDisponibilidad.disponible && (
+                                        <Alert
+                                            severity="info"
+                                            icon={<CalendarTodayOutlinedIcon />}
+                                            sx={{
+                                                borderRadius: "10px",
+                                                alignItems: "flex-start",
+                                                mt: 1,
+                                            }}
+                                        >
+                                            <Typography sx={{ fontWeight: 700, mb: 0.5 }}>
+                                                ¿Quieres encontrar otro horario?
+                                            </Typography>
+
+                                            <Typography sx={{ fontSize: "0.875rem", mb: 1.5 }}>
+                                                Consulta el calendario de ocupación para visualizar
+                                                los días reservados y disponibles del espacio
+                                                seleccionado.
+                                            </Typography>
+
+                                            <Button
+                                                onClick={irAlCalendario}
+                                                variant="contained"
+                                                size="small"
+                                                startIcon={<CalendarTodayOutlinedIcon />}
+                                                sx={{
+                                                    bgcolor: AZUL,
+                                                    textTransform: "none",
+                                                    borderRadius: "8px",
+                                                    "&:hover": {
+                                                        bgcolor: AZUL_OSCURO,
+                                                    },
+                                                }}
+                                            >
+                                                Visualizar calendario
+                                            </Button>
+                                        </Alert>
+                                    )}
+
+                                </Box>
+                            </Stack>
+                        )}
+                    </DialogContent>
+
+                    <DialogActions sx={{ px: 3, pb: 2 }}>
+                        <Button
+                            onClick={() => setModalConsultaAbierto(false)}
+                            variant="contained"
+                            sx={{
+                                bgcolor: AZUL,
+                                textTransform: "none",
+                                borderRadius: "8px",
+                                px: 3,
+                                "&:hover": {
+                                    bgcolor: AZUL_OSCURO,
+                                },
+                            }}
+                        >
+                            Cerrar
+                        </Button>
+                    </DialogActions>
+                </Dialog>
                 <ModalDisponibilidad
                     open={modalAbierto}
                     onClose={() => setModalAbierto(false)}

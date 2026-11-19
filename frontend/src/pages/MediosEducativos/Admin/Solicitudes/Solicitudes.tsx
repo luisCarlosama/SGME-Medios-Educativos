@@ -21,6 +21,10 @@ import {
 } from "@mui/material";
 import AdminLayout from "../../../../components/layout/AdminLayout";
 import { listarSolicitudes } from "./services/solicitudes.service";
+import {
+  obtenerCampus,
+  obtenerEspacios,
+} from "../../Public/Reserva/services/reservas.service";
 
 const estadoStyles: Record<string, { bg: string; color: string }> = {
   Pendiente: { bg: "#FEF3C7", color: "#B45309" },
@@ -58,6 +62,10 @@ export default function Solicitudes() {
   const [espacio, setEspacio] = useState("");
   const [horario, setHorario] = useState("");
 
+  const [campusLista, setCampusLista] = useState<any[]>([]);
+  const [espaciosLista, setEspaciosLista] = useState<any[]>([]);
+  const [cargandoCatalogos, setCargandoCatalogos] = useState(true);
+
   const cargarSolicitudes = async (filtros: Record<string, string> = {}) => {
     setLoading(true);
     setError("");
@@ -80,6 +88,29 @@ export default function Solicitudes() {
 
   useEffect(() => {
     cargarSolicitudes();
+  }, []);
+
+  useEffect(() => {
+    const cargarCatalogos = async () => {
+      setCargandoCatalogos(true);
+
+      try {
+        const [campusData, espaciosData] = await Promise.all([
+          obtenerCampus(),
+          obtenerEspacios(),
+        ]);
+
+        setCampusLista(campusData || []);
+        setEspaciosLista(espaciosData || []);
+      } catch (err) {
+        console.error("Error al cargar filtros de solicitudes:", err);
+        setError("No se pudieron cargar los filtros de campus y espacios.");
+      } finally {
+        setCargandoCatalogos(false);
+      }
+    };
+
+    cargarCatalogos();
   }, []);
 
   const handleFiltrar = () => {
@@ -227,6 +258,7 @@ export default function Solicitudes() {
             <FormControl size="small" sx={{ minWidth: 120 }}>
               <Select
                 displayEmpty
+                disabled={cargandoCatalogos}
                 value={campus}
                 onChange={(e: SelectChangeEvent) => setCampus(e.target.value)}
                 renderValue={(selected) =>
@@ -235,8 +267,15 @@ export default function Solicitudes() {
                 sx={{ borderRadius: "8px", height: 36, fontSize: "0.85rem" }}
               >
                 <MenuItem value="">Campus</MenuItem>
-                <MenuItem value="Centro">Centro</MenuItem>
-                <MenuItem value="San Damián">San Damián</MenuItem>
+
+                {campusLista.map((c: any) => (
+                  <MenuItem
+                    key={c.id_campus}
+                    value={c.nombre}
+                  >
+                    {c.nombre}
+                  </MenuItem>
+                ))}
               </Select>
             </FormControl>
 
@@ -258,18 +297,32 @@ export default function Solicitudes() {
             <FormControl size="small" sx={{ minWidth: 130 }}>
               <Select
                 displayEmpty
+                disabled={cargandoCatalogos}
                 value={espacio}
                 onChange={(e: SelectChangeEvent) => setEspacio(e.target.value)}
-                renderValue={(selected) =>
-                  selected ? selected : <span style={{ color: "#94A3B8" }}>Espacio</span>
-                }
+                renderValue={(selected) => {
+                  if (!selected) {
+                    return <span style={{ color: "#94A3B8" }}>Espacio</span>;
+                  }
+
+                  const espacioSeleccionado = espaciosLista.find(
+                    (e: any) => String(e.id_espacio) === selected
+                  );
+
+                  return espacioSeleccionado?.nombre || "Espacio";
+                }}
                 sx={{ borderRadius: "8px", height: 36, fontSize: "0.85rem" }}
               >
                 <MenuItem value="">Espacio</MenuItem>
-                <MenuItem value="Auditorio">Auditorio</MenuItem>
-                <MenuItem value="Aula de clase">Aula de clase</MenuItem>
-                <MenuItem value="Laboratorio">Laboratorio</MenuItem>
-                <MenuItem value="Sala especial">Sala especial</MenuItem>
+
+                {espaciosLista.map((e: any) => (
+                  <MenuItem
+                    key={e.id_espacio}
+                    value={String(e.id_espacio)}
+                  >
+                    {e.nombre}
+                  </MenuItem>
+                ))}
               </Select>
             </FormControl>
 

@@ -27,10 +27,11 @@ export const obtenerDashboard = async (req, res) => {
       `),
 
       pool.query(`
-        SELECT COUNT(*)::int AS total
-        FROM solicitud_reserva sr
-        WHERE sr.estado = 'Aprobada'
-          AND CURRENT_DATE BETWEEN sr.fecha_inicio AND sr.fecha_fin
+      SELECT COUNT(*)::int AS total
+      FROM solicitud_reserva sr
+      WHERE sr.estado = 'Aprobada'
+      AND sr.fecha_inicio = CURRENT_DATE
+      AND sr.fecha_fin = CURRENT_DATE
       `),
 
       pool.query(`

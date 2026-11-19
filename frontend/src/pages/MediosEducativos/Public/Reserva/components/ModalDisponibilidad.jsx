@@ -23,17 +23,33 @@ function generarHorarios(fecha) {
       const fin = inicio + 1;
 
       return {
-        inicio: `${String(inicio).padStart(2, "0")}:00:00`,
-        fin: `${String(fin).padStart(2, "0")}:00:00`,
+        inicio: `${String(inicio).padStart(2, "0")}:00`,
+        fin: `${String(fin).padStart(2, "0")}:00`,
         etiqueta: `${String(inicio).padStart(2, "0")}:00 - ${String(fin).padStart(2, "0")}:00`,
       };
     }
   );
 }
 
+// Convierte cualquier formato de hora PostgreSQL a minutos.
 function horaEnMinutos(hora) {
-  const [h, m] = String(hora).split(":").map(Number);
-  return h * 60 + m;
+  if (!hora) return null;
+
+  const valor = String(hora).trim();
+  const coincidencia = valor.match(/^(\d{1,2}):(\d{2})/);
+
+  if (!coincidencia) return null;
+
+  const horas = Number(coincidencia[1]);
+  const minutos = Number(coincidencia[2]);
+
+  return horas * 60 + minutos;
+}
+
+function fechaNormalizada(fecha) {
+  if (!fecha) return "";
+
+  return String(fecha).slice(0, 10);
 }
 
 export default function ModalDisponibilidad({
@@ -47,7 +63,10 @@ export default function ModalDisponibilidad({
   const [error, setError] = useState("");
 
   useEffect(() => {
-    if (!open || !fecha || !idEspacio) return;
+    if (!open || !fecha || !idEspacio) {
+      setReservas([]);
+      return;
+    }
 
     let cancelado = false;
 
@@ -63,16 +82,23 @@ export default function ModalDisponibilidad({
         );
 
         if (!cancelado) {
-          setReservas(datos.reservas ?? []);
+          setReservas(
+            Array.isArray(datos.reservas)
+              ? datos.reservas
+              : []
+          );
         }
       } catch (err) {
         if (!cancelado) {
           setError(
-            err.message || "No fue posible consultar la agenda."
+            err.message ||
+            "No fue posible consultar la agenda."
           );
         }
       } finally {
-        if (!cancelado) setCargando(false);
+        if (!cancelado) {
+          setCargando(false);
+        }
       }
     }
 
@@ -86,16 +112,21 @@ export default function ModalDisponibilidad({
   if (!open) return null;
 
   const horarios = fecha ? generarHorarios(fecha) : [];
+
   const domingo =
-    fecha && new Date(`${fecha}T12:00:00`).getDay() === 0;
+    fecha &&
+    new Date(`${fecha}T12:00:00`).getDay() === 0;
 
   const fechaLegible = fecha
-    ? new Date(`${fecha}T12:00:00`).toLocaleDateString("es-CO", {
+    ? new Date(`${fecha}T12:00:00`).toLocaleDateString(
+      "es-CO",
+      {
         weekday: "long",
         day: "numeric",
         month: "long",
         year: "numeric",
-      })
+      }
+    )
     : "";
 
   function estaReservado(horario) {
@@ -103,141 +134,218 @@ export default function ModalDisponibilidad({
     const finSlot = horaEnMinutos(horario.fin);
 
     return reservas.some((reserva) => {
-      const inicioReserva = horaEnMinutos(reserva.hora_inicio);
-      const finReserva = horaEnMinutos(reserva.hora_fin);
+      const fechaInicio = fechaNormalizada(
+        reserva.fecha_inicio
+      );
 
-      return inicioReserva < finSlot && finReserva > inicioSlot;
+      const fechaFin = fechaNormalizada(
+        reserva.fecha_fin
+      );
+
+      // Verificar que la reserva corresponda al día consultado.
+      if (
+        fechaInicio > fecha ||
+        fechaFin < fecha
+      ) {
+        return false;
+      }
+
+      const inicioReserva = horaEnMinutos(
+        reserva.hora_inicio
+      );
+
+      const finReserva = horaEnMinutos(
+        reserva.hora_fin
+      );
+
+      if (
+        inicioReserva === null ||
+        finReserva === null
+      ) {
+        return false;
+      }
+
+      // Detectar cualquier cruce entre la reserva y la franja.
+      return (
+        inicioReserva < finSlot &&
+        finReserva > inicioSlot
+      );
     });
   }
 
   return (
     <div
-      onClick={onClose}
       style={{
         position: "fixed",
         inset: 0,
-        zIndex: 1300,
-        background: "rgba(15, 23, 42, 0.45)",
+        backgroundColor: "rgba(15, 23, 42, 0.55)",
+        zIndex: 1400,
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
-        padding: 16,
+        padding: "20px",
       }}
+      onClick={onClose}
     >
-      <section
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="agenda-titulo"
+      <div
         onClick={(e) => e.stopPropagation()}
         style={{
-          background: "#fff",
-          borderRadius: 16,
+          background: "#FFFFFF",
           width: "100%",
-          maxWidth: 520,
+          maxWidth: "650px",
           maxHeight: "85vh",
           overflowY: "auto",
-          padding: 24,
+          borderRadius: "16px",
+          padding: "24px",
           boxShadow: "0 20px 50px rgba(0,0,0,0.2)",
         }}
       >
-        <header
+        <div
           style={{
             display: "flex",
             justifyContent: "space-between",
-            alignItems: "flex-start",
-            gap: 16,
+            alignItems: "center",
+            gap: "12px",
+            marginBottom: "8px",
           }}
         >
-          <div>
-            <h2
-              id="agenda-titulo"
-              style={{ margin: 0, fontSize: 22, color: "#172554" }}
-            >
-              Agenda del día
-            </h2>
-            <p style={{ margin: "8px 0 0", color: "#64748b" }}>
-              {fechaLegible}
-            </p>
-          </div>
+          <h2
+            style={{
+              margin: 0,
+              color: "#123B6D",
+              fontSize: "21px",
+            }}
+          >
+            Disponibilidad del espacio
+          </h2>
 
           <button
-            type="button"
             onClick={onClose}
-            aria-label="Cerrar agenda"
             style={{
-              border: 0,
+              border: "none",
               background: "transparent",
-              fontSize: 25,
+              fontSize: "26px",
               cursor: "pointer",
-              color: "#64748b",
+              color: "#64748B",
             }}
           >
             ×
           </button>
-        </header>
+        </div>
 
-        <p style={{ color: "#475569", fontSize: 14, margin: "18px 0" }}>
-          Consulta de ocupación por hora para el espacio seleccionado.
+        <p
+          style={{
+            color: "#64748B",
+            textTransform: "capitalize",
+            marginBottom: "20px",
+          }}
+        >
+          {fechaLegible}
         </p>
 
-        {cargando && <p>Consultando agenda...</p>}
+        <div
+          style={{
+            display: "flex",
+            gap: "18px",
+            flexWrap: "wrap",
+            marginBottom: "20px",
+          }}
+        >
+          <span style={{ color: "#065F46" }}>
+            🟢 Disponible
+          </span>
 
-        {!cargando && error && (
-          <p style={{ color: "#b91c1c" }}>{error}</p>
+          <span style={{ color: "#991B1B" }}>
+            🔴 Ocupado
+          </span>
+        </div>
+
+        {cargando && (
+          <p style={{ textAlign: "center", padding: "25px" }}>
+            Consultando disponibilidad...
+          </p>
+        )}
+
+        {error && (
+          <div
+            style={{
+              background: "#FEE2E2",
+              color: "#991B1B",
+              padding: "14px",
+              borderRadius: "8px",
+            }}
+          >
+            {error}
+          </div>
         )}
 
         {!cargando && !error && domingo && (
           <p
             style={{
-              background: "#f1f5f9",
-              color: "#475569",
-              borderRadius: 8,
-              padding: 16,
+              background: "#F1F5F9",
+              color: "#64748B",
+              padding: "18px",
+              borderRadius: "10px",
+              textAlign: "center",
             }}
           >
-            No hay atención los domingos.
+            El espacio no tiene servicio los domingos.
           </p>
         )}
 
         {!cargando && !error && !domingo && (
-          <div style={{ display: "grid", gap: 8 }}>
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns:
+                "repeat(auto-fit, minmax(145px, 1fr))",
+              gap: "10px",
+            }}
+          >
             {horarios.map((horario) => {
-              const reservado = estaReservado(horario);
+              const ocupado = estaReservado(horario);
 
               return (
                 <div
                   key={horario.inicio}
+
                   style={{
-                    display: "flex",
-                    justifyContent: "space-between",
-                    alignItems: "center",
-                    gap: 12,
-                    padding: "12px 14px",
-                    borderRadius: 8,
-                    background: reservado ? "#fee2e2" : "#dcfce7",
-                    color: reservado ? "#991b1b" : "#166534",
+                    padding: "15px 10px",
+                    borderRadius: "10px",
+                    textAlign: "center",
+                    background: ocupado
+                      ? "#FCA5A5"
+                      : "#D1FAE5",
+                    color: ocupado
+                      ? "#7F1D1D"
+                      : "#065F46",
+                    border: `1px solid ${ocupado ? "#DC2626" : "#A7F3D0"
+                      }`,
+                    fontWeight: ocupado ? 700 : 500,
+                    boxShadow: ocupado
+                      ? "0 2px 5px rgba(220, 38, 38, 0.15)"
+                      : "none",
                   }}
                 >
-                  <span>{horario.etiqueta}</span>
-                  <strong>{reservado ? "Reservado" : "Disponible"}</strong>
+                  <strong
+                    style={{
+                      display: "block",
+                      fontSize: "14px",
+                      marginBottom: "5px",
+                    }}
+                  >
+                    {horario.etiqueta}
+                  </strong>
+
+                  <span style={{ fontSize: "13px" }}>
+                    {ocupado ? "Ocupado" : "Disponible"}
+                  </span>
                 </div>
               );
             })}
           </div>
         )}
-
-        <footer
-          style={{
-            borderTop: "1px solid #e2e8f0",
-            marginTop: 20,
-            paddingTop: 14,
-            color: "#64748b",
-            fontSize: 12,
-          }}
-        >
-          La ocupación se consulta con las reservas aprobadas registradas en el sistema.
-        </footer>
-      </section>
+      </div>
     </div>
   );
 }

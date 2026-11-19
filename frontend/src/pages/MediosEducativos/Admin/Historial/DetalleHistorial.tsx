@@ -147,13 +147,18 @@ export default function FichaHistorica() {
       ["Correo electrónico", ficha.solicitante?.correo],
       ["Número de contacto", ficha.solicitante?.numero_contacto],
       ["Identificación", ficha.solicitante?.identificacion],
-      ["Programa", ficha.solicitante?.programa],
+
+      // Información institucional del solicitante interno
       ["Dependencia", ficha.solicitante?.dependencia],
-      ["Área", ficha.solicitante?.area],
-      ["Departamento", ficha.solicitante?.departamento],
+      ["Facultad", ficha.solicitante?.facultad],
+      ["Programa", ficha.solicitante?.programa],
+
+      // Información del solicitante externo
       ["Entidad", ficha.solicitante?.nombre_entidad],
       ["Tipo de entidad", ficha.solicitante?.tipo_entidad],
       ["Ciudad", ficha.solicitante?.ciudad],
+
+      // Información de la reserva
       ["Espacio", ficha.espacio],
       ["Campus", ficha.campus],
       ["Fecha inicial", ficha.fecha_inicio],
@@ -161,7 +166,7 @@ export default function FichaHistorica() {
       ["Hora de inicio", ficha.hora_inicio],
       ["Hora de finalización", ficha.hora_fin],
       ["Medios requeridos", ficha.medios_requeridos],
-      ["Observaciones", ficha.observaciones],
+      ["Observaciones del solicitante", ficha.observaciones],
     ];
 
     return (
@@ -272,21 +277,27 @@ export default function FichaHistorica() {
           </Card>
         )}
 
-        {(ficha.motivo_cancelacion || ficha.estado === "Rechazada") && (
-          <Card
-            elevation={0}
-            sx={{ border: "1px solid #E5EAF0", borderRadius: 2, mt: 2 }}
-          >
-            <CardContent sx={{ p: 3 }}>
-              <Typography sx={{ fontWeight: 700, mb: 1 }}>
-                Motivo de gestión
-              </Typography>
-              <Typography>
-                {ficha.motivo_cancelacion || "—"}
-              </Typography>
-            </CardContent>
-          </Card>
-        )}
+        {(ficha.estado === "Rechazada" ||
+          ficha.estado === "Cancelada") && (
+            <Card
+              elevation={0}
+              sx={{
+                border: "1px solid #E5EAF0",
+                borderRadius: 2,
+                mt: 2,
+              }}
+            >
+              <CardContent sx={{ p: 3 }}>
+                <Typography sx={{ fontWeight: 700, mb: 1 }}>
+                  Motivo de rechazo o cancelación
+                </Typography>
+
+                <Typography>
+                  {ficha.motivo_cancelacion || "No se registró un motivo de gestión."}
+                </Typography>
+              </CardContent>
+            </Card>
+          )}
 
         <Typography sx={{ color: "#5A6A7A", fontSize: "0.85rem", mt: 3 }}>
           Registro histórico de consulta. Esta reserva no se puede editar desde

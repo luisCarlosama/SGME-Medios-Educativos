@@ -1,7 +1,3 @@
-/**
- * Interfaces para el módulo Agenda por campus.
- * Preparadas para futuro mapeo con respuestas de API / base de datos.
- */
 
 export type EstadoReserva =
   | 'Aprobada'

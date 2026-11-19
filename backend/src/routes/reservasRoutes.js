@@ -7,6 +7,7 @@ import {
   crearSolicitud,
   consultarDisponibilidad,
   obtenerAgendaDia,
+  obtenerAgendaMes,
   consultarSolicitudPorCodigo,
   obtenerSolicitudPorId,
   actualizarEstadoSolicitud,
@@ -24,6 +25,7 @@ router.get('/espacios', obtenerEspacios);
 router.get('/catalogos-institucionales', obtenerCatalogosInstitucionales);
 router.get('/disponibilidad', consultarDisponibilidad);
 router.get('/agenda-dia', obtenerAgendaDia);
+router.get('/agenda-mes', obtenerAgendaMes);
 router.get('/codigo/:codigo', consultarSolicitudPorCodigo);
 router.get('/agenda', listarAgenda);
 
