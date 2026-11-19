@@ -21,3 +21,7 @@ CREATE TABLE IF NOT EXISTS public.proceso_grado_ceremonia (
   estado_sincronizacion VARCHAR(20) NOT NULL DEFAULT 'Sin solicitar',
   error_sincronizacion TEXT
 );
+
+
+
+

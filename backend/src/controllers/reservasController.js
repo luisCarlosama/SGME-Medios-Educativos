@@ -1275,16 +1275,20 @@ export const actualizarSolicitud = async (req, res) => {
     // 1. Consultar la solicitud y el tipo de solicitante
     const actual = await cliente.query(
       `
-      SELECT
-        sr.id_solicitud,
-        sr.id_solicitante,
-        sr.estado,
-        s.tipo_solicitante
-      FROM solicitud_reserva sr
-      INNER JOIN solicitante s
-        ON s.id_solicitante = sr.id_solicitante
-      WHERE sr.id_solicitud = $1
-      `,
+  SELECT
+    sr.id_solicitud,
+    sr.id_solicitante,
+    sr.estado,
+    sr.es_recurrente,
+    sr.frecuencia_recurrencia,
+    sr.dias_semana,
+    s.tipo_solicitante
+  FROM solicitud_reserva sr
+  INNER JOIN solicitante s
+    ON s.id_solicitante = sr.id_solicitante
+  WHERE sr.id_solicitud = $1
+  FOR UPDATE OF sr
+  `,
       [idSolicitud]
     );
 
@@ -1295,16 +1299,69 @@ export const actualizarSolicitud = async (req, res) => {
       });
     }
 
-    const idSolicitante = actual.rows[0].id_solicitante;
+    const solicitudActual = actual.rows[0];
+
+    const idSolicitante = solicitudActual.id_solicitante;
+
     const tipoSolicitante = String(
-      actual.rows[0].tipo_solicitante
+      solicitudActual.tipo_solicitante
     ).trim().toLowerCase();
 
-    // 2. Determinar si la solicitud es recurrente
+    // 2. Determinar la recurrencia respetando la solicitud existente
+    const tieneRecurrenciaEnviada = Object.prototype.hasOwnProperty.call(
+      req.body,
+      'es_recurrente'
+    );
+
+    let es_recurrente = tieneRecurrenciaEnviada
+      ? req.body.es_recurrente === true || req.body.es_recurrente === 'true'
+      : Boolean(solicitudActual.es_recurrente);
+
+    // Si el formulario no envía estos datos, conservar los que están en BD.
+    const frecuenciaFinal =
+      frecuencia_recurrencia ??
+      solicitudActual.frecuencia_recurrencia ??
+      null;
+
+    const diasSemanaFinal =
+      dias_semana ??
+      solicitudActual.dias_semana ??
+      null;
+
+    // Si no se envían ocurrencias, recuperar las que ya existen.
+    // Si se envía un arreglo vacío, se respeta y se valida como vacío.
+    let ocurrenciasFinal;
+
+    if (Array.isArray(req.body.ocurrencias)) {
+      ocurrenciasFinal = req.body.ocurrencias;
+    } else {
+      const anteriores = await cliente.query(
+        `
+    SELECT
+      fecha_inicio,
+      fecha_fin,
+      hora_inicio,
+      hora_fin
+    FROM solicitud_reserva_ocurrencia
+    WHERE id_solicitud = $1
+    ORDER BY fecha_inicio
+    `,
+        [idSolicitud]
+      );
+
+      ocurrenciasFinal = anteriores.rows;
+    }
+    console.log('DEBUG ACTUALIZAR RECURRENCIA', {
+      fecha_inicio,
+      fecha_fin,
+      frecuenciaFinal,
+      diasSemanaFinal,
+      ocurrenciasRecibidas: req.body.ocurrencias,
+      ocurrenciasFinal,
+    });
     const esRangoFechas = fecha_inicio !== fecha_fin;
 
-    let es_recurrente = Boolean(req.body.es_recurrente);
-
+    // Validaciones para solicitantes externos
     if (tipoSolicitante === 'externo') {
       if (esRangoFechas) {
         await cliente.query('ROLLBACK');
@@ -1321,10 +1378,8 @@ export const actualizarSolicitud = async (req, res) => {
       }
     }
 
-    // Un rango de fechas interno implica recurrencia
-    if (tipoSolicitante === 'interno' && esRangoFechas) {
-      es_recurrente = true;
-    }
+    // Para edición ya NO convertimos automáticamente cualquier rango interno
+    // en recurrente. Se conserva el valor enviado o el que ya existe en BD.
 
     if (tipoSolicitante === 'interno' && es_recurrente && !esRangoFechas) {
       await cliente.query('ROLLBACK');
@@ -1355,14 +1410,17 @@ export const actualizarSolicitud = async (req, res) => {
 
     // 4. Validar recurrencia
     if (es_recurrente) {
-      if (!Array.isArray(ocurrencias) || ocurrencias.length === 0) {
+      if (
+        !Array.isArray(ocurrenciasFinal) ||
+        ocurrenciasFinal.length === 0
+      ) {
         await cliente.query('ROLLBACK');
         return res.status(400).json({
           mensaje: 'Debes enviar las fechas de las ocurrencias recurrentes.',
         });
       }
 
-      if (!['diaria', 'semanal', 'mensual'].includes(frecuencia_recurrencia)) {
+      if (!['diaria', 'semanal', 'mensual'].includes(frecuenciaFinal)) {
         await cliente.query('ROLLBACK');
         return res.status(400).json({
           mensaje: 'La frecuencia de recurrencia no es válida.',
@@ -1370,11 +1428,11 @@ export const actualizarSolicitud = async (req, res) => {
       }
 
       if (
-        frecuencia_recurrencia === 'semanal' &&
+        frecuenciaFinal === 'semanal' &&
         (
-          !Array.isArray(dias_semana) ||
-          dias_semana.length === 0 ||
-          dias_semana.some(
+          !Array.isArray(diasSemanaFinal) ||
+          diasSemanaFinal.length === 0 ||
+          diasSemanaFinal.some(
             (dia) =>
               !Number.isInteger(Number(dia)) ||
               Number(dia) < 1 ||
@@ -1388,18 +1446,20 @@ export const actualizarSolicitud = async (req, res) => {
         });
       }
 
-      for (const occ of ocurrencias) {
+      for (const occ of ocurrenciasFinal) {
         if (
           !occ.fecha_inicio ||
           !occ.fecha_fin ||
           !occ.hora_inicio ||
           !occ.hora_fin ||
           occ.fecha_fin < occ.fecha_inicio ||
-          occ.hora_fin <= occ.hora_inicio
+          occ.hora_fin <= occ.hora_inicio ||
+          occ.fecha_inicio < fecha_inicio ||
+          occ.fecha_fin > fecha_fin
         ) {
           await cliente.query('ROLLBACK');
           return res.status(400).json({
-            mensaje: 'Una de las ocurrencias tiene fechas u horarios inválidos.',
+            mensaje: 'Una de las ocurrencias tiene fechas u horarios inválidos o está fuera del rango de la recurrencia.',
           });
         }
       }
@@ -1424,49 +1484,80 @@ export const actualizarSolicitud = async (req, res) => {
     }
 
     // 6. Validar disponibilidad, excluyendo la propia solicitud
+
+    const periodosAValidar = es_recurrente
+      ? ocurrenciasFinal
+      : [
+        {
+          fecha_inicio,
+          fecha_fin,
+          hora_inicio,
+          hora_fin,
+        },
+      ];
+
     const conflicto = await cliente.query(
       `
-      SELECT EXISTS (
-        SELECT 1
-        FROM solicitud_reserva sr
-        WHERE sr.id_espacio = $1
-          AND sr.id_solicitud <> $2
-          AND sr.estado = 'Aprobada'
-          AND sr.es_recurrente = FALSE
-          AND sr.fecha_inicio <= $4::date
-          AND sr.fecha_fin >= $3::date
-          AND sr.hora_inicio < $6::time
-          AND sr.hora_fin > $5::time
-      )
-      OR EXISTS (
-        SELECT 1
-        FROM solicitud_reserva sr
-        INNER JOIN solicitud_reserva_ocurrencia o
-          ON o.id_solicitud = sr.id_solicitud
-        WHERE sr.id_espacio = $1
-          AND sr.id_solicitud <> $2
-          AND sr.estado = 'Aprobada'
-          AND sr.es_recurrente = TRUE
-          AND o.fecha_inicio <= $4::date
-          AND o.fecha_fin >= $3::date
-          AND o.hora_inicio < $6::time
-          AND o.hora_fin > $5::time
-      ) AS ocupado
-      `,
+  WITH periodos_nuevos AS (
+    SELECT
+      p.fecha_inicio,
+      p.fecha_fin,
+      p.hora_inicio,
+      p.hora_fin
+    FROM jsonb_to_recordset($3::jsonb) AS p(
+      fecha_inicio DATE,
+      fecha_fin DATE,
+      hora_inicio TIME,
+      hora_fin TIME
+    )
+  )
+
+  SELECT
+    EXISTS (
+      -- Comparar contra solicitudes aprobadas NO recurrentes
+      SELECT 1
+      FROM periodos_nuevos pn
+      INNER JOIN solicitud_reserva sr
+        ON sr.id_espacio = $1
+       AND sr.id_solicitud <> $2
+       AND sr.estado = 'Aprobada'
+       AND COALESCE(sr.es_recurrente, FALSE) = FALSE
+       AND sr.fecha_inicio <= pn.fecha_fin
+       AND sr.fecha_fin >= pn.fecha_inicio
+       AND sr.hora_inicio < pn.hora_fin
+       AND sr.hora_fin > pn.hora_inicio
+    )
+
+    OR EXISTS (
+      -- Comparar contra las ocurrencias de otras
+      -- solicitudes recurrentes aprobadas.
+      SELECT 1
+      FROM periodos_nuevos pn
+      INNER JOIN solicitud_reserva_ocurrencia o
+        ON o.fecha_inicio <= pn.fecha_fin
+       AND o.fecha_fin >= pn.fecha_inicio
+       AND o.hora_inicio < pn.hora_fin
+       AND o.hora_fin > pn.hora_inicio
+      INNER JOIN solicitud_reserva sr
+        ON sr.id_solicitud = o.id_solicitud
+       AND sr.id_espacio = $1
+       AND sr.id_solicitud <> $2
+       AND sr.estado = 'Aprobada'
+       AND sr.es_recurrente = TRUE
+    ) AS ocupado
+  `,
       [
         Number(id_espacio),
         idSolicitud,
-        fecha_inicio,
-        fecha_fin,
-        hora_inicio,
-        hora_fin,
+        JSON.stringify(periodosAValidar),
       ]
     );
 
     if (conflicto.rows[0].ocupado) {
       await cliente.query('ROLLBACK');
+
       return res.status(409).json({
-        mensaje: 'El espacio no está disponible en las fechas y horarios seleccionados.',
+        mensaje: 'El espacio no está disponible en una o varias de las fechas y horarios seleccionados.',
       });
     }
 
@@ -1511,24 +1602,48 @@ export const actualizarSolicitud = async (req, res) => {
       ]
     );
 
-    // 8. Actualizar la solicitud
+    /// 8. Preparar la solicitud para reemplazar sus ocurrencias.
+
+    const estabaAprobada = solicitudActual.estado === 'Aprobada';
+
+    if (estabaAprobada) {
+      await cliente.query(
+        `
+    UPDATE solicitud_reserva
+    SET estado = 'Pendiente'
+    WHERE id_solicitud = $1
+    `,
+        [idSolicitud]
+      );
+    }
+
+    // 9. Eliminar las ocurrencias anteriores
     await cliente.query(
       `
-      UPDATE solicitud_reserva SET
-        id_espacio = $1,
-        fecha_inicio = $2,
-        fecha_fin = $3,
-        hora_inicio = $4,
-        hora_fin = $5,
-        nombre_actividad = $6,
-        medios_requeridos = $7,
-        observaciones = $8,
-        es_recurrente = $9,
-        frecuencia_recurrencia = $10,
-        dias_semana = $11,
-        fecha_actualizacion = NOW()
-      WHERE id_solicitud = $12
-      `,
+  DELETE FROM solicitud_reserva_ocurrencia
+  WHERE id_solicitud = $1
+  `,
+      [idSolicitud]
+    );
+
+    // 10. Actualizar los datos principales de la solicitud
+    await cliente.query(
+      `
+  UPDATE solicitud_reserva SET
+    id_espacio = $1,
+    fecha_inicio = $2,
+    fecha_fin = $3,
+    hora_inicio = $4,
+    hora_fin = $5,
+    nombre_actividad = $6,
+    medios_requeridos = $7,
+    observaciones = $8,
+    es_recurrente = $9,
+    frecuencia_recurrencia = $10,
+    dias_semana = $11,
+    fecha_actualizacion = NOW()
+  WHERE id_solicitud = $12
+  `,
       [
         Number(id_espacio),
         fecha_inicio,
@@ -1539,36 +1654,28 @@ export const actualizarSolicitud = async (req, res) => {
         medios_requeridos || null,
         observaciones?.trim() || null,
         es_recurrente,
-        es_recurrente ? frecuencia_recurrencia : null,
-        es_recurrente && frecuencia_recurrencia === 'semanal'
-          ? dias_semana.map(Number)
+        es_recurrente ? frecuenciaFinal : null,
+        es_recurrente && frecuenciaFinal === 'semanal'
+          ? diasSemanaFinal.map(Number)
           : null,
         idSolicitud,
       ]
     );
 
-    // 9. Reemplazar las ocurrencias anteriores
-    await cliente.query(
-      `
-      DELETE FROM solicitud_reserva_ocurrencia
-      WHERE id_solicitud = $1
-      `,
-      [idSolicitud]
-    );
-
+    // 11. Registrar las ocurrencias nuevas
     if (es_recurrente) {
-      for (const occ of ocurrencias) {
+      for (const occ of ocurrenciasFinal) {
         await cliente.query(
           `
-          INSERT INTO solicitud_reserva_ocurrencia (
-            id_solicitud,
-            fecha_inicio,
-            fecha_fin,
-            hora_inicio,
-            hora_fin
-          )
-          VALUES ($1, $2, $3, $4, $5)
-          `,
+      INSERT INTO solicitud_reserva_ocurrencia (
+        id_solicitud,
+        fecha_inicio,
+        fecha_fin,
+        hora_inicio,
+        hora_fin
+      )
+      VALUES ($1, $2, $3, $4, $5)
+      `,
           [
             idSolicitud,
             occ.fecha_inicio,
@@ -1578,6 +1685,19 @@ export const actualizarSolicitud = async (req, res) => {
           ]
         );
       }
+    }
+
+    // 12. Si estaba aprobada, recuperar su estado.
+
+    if (estabaAprobada) {
+      await cliente.query(
+        `
+    UPDATE solicitud_reserva
+    SET estado = 'Aprobada'
+    WHERE id_solicitud = $1
+    `,
+        [idSolicitud]
+      );
     }
 
     await cliente.query('COMMIT');

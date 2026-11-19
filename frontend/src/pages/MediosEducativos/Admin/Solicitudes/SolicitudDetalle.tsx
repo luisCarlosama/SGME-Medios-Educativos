@@ -16,6 +16,8 @@ import {
   DialogTitle,
   DialogContent,
   DialogActions,
+  Checkbox,
+  FormControlLabel,
 } from "@mui/material";
 
 import ArrowBackIcon from "@mui/icons-material/ArrowBack";
@@ -77,6 +79,92 @@ function obtenerFechaInput(fecha?: string | null): string {
   return fecha.split("T")[0];
 }
 
+function generarOcurrencias(
+  fechaInicio: string,
+  fechaFin: string,
+  frecuencia: string,
+  diasSemana: number[],
+  horaInicio: string,
+  horaFin: string
+) {
+  const resultado = [];
+  const inicio = new Date(`${fechaInicio}T12:00:00Z`);
+  const fin = new Date(`${fechaFin}T12:00:00Z`);
+
+  for (
+    let fecha = new Date(inicio);
+    fecha <= fin;
+    fecha.setUTCDate(fecha.getUTCDate() + 1)
+  ) {
+    const dia = fecha.getUTCDay() || 7;
+
+    let incluir = false;
+
+    if (frecuencia === "diaria") {
+      incluir = true;
+    } else if (frecuencia === "semanal") {
+      incluir = diasSemana.includes(dia);
+    } else if (frecuencia === "mensual") {
+      incluir = fecha.getUTCDate() === inicio.getUTCDate();
+    }
+
+    if (incluir) {
+      const fechaISO = fecha.toISOString().slice(0, 10);
+
+      resultado.push({
+        fecha_inicio: fechaISO,
+        fecha_fin: fechaISO,
+        hora_inicio: horaInicio,
+        hora_fin: horaFin,
+      });
+    }
+  }
+
+  return resultado;
+}
+
+function generarFechasRecurrencia(
+  inicio: string,
+  fin: string,
+  frecuencia: string,
+  diasSemana: number[] = []
+): string[] {
+  if (!inicio || !fin || !frecuencia) return [];
+
+  const fechas: string[] = [];
+  const fecha = new Date(`${inicio}T12:00:00Z`);
+  const fechaFinal = new Date(`${fin}T12:00:00Z`);
+  const diaInicial = fecha.getUTCDate();
+
+  while (fecha <= fechaFinal) {
+    const diaSemana = fecha.getUTCDay() === 0
+      ? 7
+      : fecha.getUTCDay();
+
+    let incluir = false;
+
+    if (frecuencia === "diaria") {
+      incluir = true;
+    }
+
+    if (frecuencia === "semanal") {
+      incluir = diasSemana.includes(diaSemana);
+    }
+
+    if (frecuencia === "mensual") {
+      incluir = fecha.getUTCDate() === diaInicial;
+    }
+
+    if (incluir) {
+      fechas.push(fecha.toISOString().slice(0, 10));
+    }
+
+    fecha.setUTCDate(fecha.getUTCDate() + 1);
+  }
+
+  return fechas;
+}
+
 // COMPONENTE PRINCIPAL
 
 export default function DetalleSolicitud() {
@@ -116,8 +204,8 @@ export default function DetalleSolicitud() {
   const [facultades, setFacultades] = useState<any[]>([]);
   const [programas, setProgramas] = useState<any[]>([]);
 
-    // CARGAR SOLICITUD
-  
+  // CARGAR SOLICITUD
+
   useEffect(() => {
     if (!id) {
       setError("No se recibió el identificador de la solicitud.");
@@ -159,8 +247,8 @@ export default function DetalleSolicitud() {
     };
   }, [id]);
 
-    // CARGAR CATÁLOGOS AL ENTRAR EN MODO EDICIÓN
-  
+  // CARGAR CATÁLOGOS AL ENTRAR EN MODO EDICIÓN
+
   useEffect(() => {
     if (!modoEdicion || !solicitud) return;
 
@@ -295,8 +383,8 @@ export default function DetalleSolicitud() {
     };
   }, [modoEdicion, solicitud]);
 
-    // CARGAR ESPACIOS SEGÚN CAMPUS Y TIPO
-  
+  // CARGAR ESPACIOS SEGÚN CAMPUS Y TIPO
+
   useEffect(() => {
     if (!modoEdicion || !form.id_campus) {
       setEspacios([]);
@@ -338,8 +426,8 @@ export default function DetalleSolicitud() {
     };
   }, [modoEdicion, form.id_campus, form.id_tipo_espacio]);
 
-    // ENTRAR EN MODO EDICIÓN
-  
+  // ENTRAR EN MODO EDICIÓN
+
   const entrarEdicion = () => {
     if (!solicitud) return;
 
@@ -347,14 +435,22 @@ export default function DetalleSolicitud() {
     const espacio = solicitud.espacio || {};
 
     setForm({
+      // Datos del evento
       nombre_actividad: solicitud.nombre_actividad || "",
       fecha_inicio: obtenerFechaInput(solicitud.fecha_inicio),
       fecha_fin: obtenerFechaInput(solicitud.fecha_fin),
       hora_inicio: formatearHora(solicitud.hora_inicio),
       hora_fin: formatearHora(solicitud.hora_fin),
+
       medios_requeridos: solicitud.medios_requeridos || "",
       observaciones: solicitud.observaciones || "",
-      es_recurrente: solicitud.es_recurrente || false,
+
+      // Datos de recurrencia
+      es_recurrente: solicitud.es_recurrente ?? false,
+      frecuencia_recurrencia: solicitud.frecuencia_recurrencia || "",
+      dias_semana: Array.isArray(solicitud.dias_semana)
+        ? solicitud.dias_semana.map(Number)
+        : [],
 
       // Solicitante
       nombre: solicitante.nombre || "",
@@ -399,16 +495,16 @@ export default function DetalleSolicitud() {
     setError("");
   };
 
-    // CANCELAR EDICIÓN
-  
+  // CANCELAR EDICIÓN
+
   const cancelarEdicion = () => {
     setModoEdicion(false);
     setError("");
     setEspacios([]);
   };
 
-    // CAMBIOS EN FORMULARIO
-  
+  // CAMBIOS EN FORMULARIO
+
   const handleChange = (campo: string) => (e: any) => {
     const valor = e.target.value;
 
@@ -438,8 +534,8 @@ export default function DetalleSolicitud() {
     });
   };
 
-    // GUARDAR CAMBIOS
-  
+  // GUARDAR CAMBIOS
+
   const guardarCambios = async () => {
     if (!id || guardando) return;
 
@@ -488,17 +584,83 @@ export default function DetalleSolicitud() {
       return;
     }
 
+    const esRecurrente =
+      esInterno && Boolean(form.es_recurrente);
+
+    if (esRecurrente) {
+      if (form.fecha_inicio === form.fecha_fin) {
+        setError(
+          "Una solicitud recurrente debe tener fechas inicial y final diferentes."
+        );
+        return;
+      }
+
+      if (
+        !["diaria", "semanal", "mensual"].includes(
+          form.frecuencia_recurrencia
+        )
+      ) {
+        setError("Debes seleccionar una frecuencia de recurrencia válida.");
+        return;
+      }
+
+      if (
+        form.frecuencia_recurrencia === "semanal" &&
+        (!Array.isArray(form.dias_semana) ||
+          form.dias_semana.length === 0)
+      ) {
+        setError("Debes seleccionar los días de la semana.");
+        return;
+      }
+      if (
+        form.frecuencia_recurrencia === "semanal" &&
+        (!Array.isArray(form.dias_semana) || form.dias_semana.length === 0)
+      ) {
+        setError("Debes seleccionar los días de la semana.");
+        return;
+      }
+    }
+
     setGuardando(true);
     setError("");
     setMensajeExito("");
 
     try {
-      // La facultad solo se utiliza para filtrar programas en la interfaz.
-      // No se envía porque se obtiene desde programa.id_dependencia.
-      const { id_facultad: _id_facultad, ...datosFormulario } = form;
+      const {
+        id_facultad: _id_facultad,
+        ...datosFormulario
+      } = form;
+
+      const ocurrenciasActualizadas = esRecurrente
+        ? generarOcurrencias(
+          form.fecha_inicio,
+          form.fecha_fin,
+          form.frecuencia_recurrencia,
+          form.dias_semana || [],
+          form.hora_inicio,
+          form.hora_fin
+        )
+        : [];
+
+      if (esRecurrente && ocurrenciasActualizadas.length === 0) {
+        setError("No se pudieron generar las ocurrencias de la recurrencia.");
+        setGuardando(false);
+        return;
+      }
 
       const datosActualizar = {
         ...datosFormulario,
+
+        es_recurrente: esRecurrente,
+
+        frecuencia_recurrencia: esRecurrente
+          ? form.frecuencia_recurrencia
+          : null,
+
+        dias_semana:
+          esRecurrente && form.frecuencia_recurrencia === "semanal"
+            ? form.dias_semana.map(Number)
+            : null,
 
         id_espacio: Number(form.id_espacio),
 
@@ -510,9 +672,12 @@ export default function DetalleSolicitud() {
           ? Number(form.id_programa)
           : null,
 
-        // La facultad se deriva del programa en PostgreSQL.
-        ocurrencias: solicitud?.ocurrencias || [],
+        ocurrencias: ocurrenciasActualizadas,
       };
+      console.log(
+        "Datos enviados para actualizar solicitud:",
+        datosActualizar
+      );
 
       await actualizarSolicitud(id, datosActualizar);
 
@@ -521,6 +686,7 @@ export default function DetalleSolicitud() {
       setSolicitud(actualizada);
       setModoEdicion(false);
       setMensajeExito("Cambios guardados correctamente.");
+
     } catch (err: unknown) {
       console.error("Error actualizando solicitud:", err);
 
@@ -529,13 +695,14 @@ export default function DetalleSolicitud() {
           ? err.message
           : "No se pudieron guardar los cambios."
       );
+
     } finally {
       setGuardando(false);
     }
   };
 
-    // APROBAR SOLICITUD
-  
+  // APROBAR SOLICITUD
+
   const handleAprobar = async () => {
     if (!id || accionando) return;
 
@@ -572,14 +739,14 @@ export default function DetalleSolicitud() {
     }
   };
 
-    // RECHAZAR SOLICITUD
-  
+  // RECHAZAR SOLICITUD
+
   const handleRechazar = () => {
     navigate(`/admin/solicitudes/${id}/rechazar`);
   };
 
-    // ESTADOS DE CARGA Y ERROR
-  
+  // ESTADOS DE CARGA Y ERROR
+
   if (loading) {
     return (
       <AdminLayout>
@@ -625,8 +792,8 @@ export default function DetalleSolicitud() {
     );
   }
 
-    // DATOS DERIVADOS
-  
+  // DATOS DERIVADOS
+
   const esInterno =
     solicitud?.solicitante?.tipo === "interno";
 
@@ -636,8 +803,8 @@ export default function DetalleSolicitud() {
       color: "#4B5563",
     };
 
-    // RENDERIZADO
-  
+  // RENDERIZADO
+
   return (
     <AdminLayout>
       <Box sx={{ width: "100%" }}>
@@ -875,6 +1042,91 @@ export default function DetalleSolicitud() {
                       </MenuItem>
                     ))}
                   </TextField>
+                  {esInterno && (
+                    <Box sx={{ gridColumn: "1 / -1", mt: 1 }}>
+                      <FormControlLabel
+                        control={
+                          <Checkbox
+                            checked={Boolean(form.es_recurrente)}
+                            onChange={(e) =>
+                              setForm((prev: any) => ({
+                                ...prev,
+                                es_recurrente: e.target.checked,
+                                frecuencia_recurrencia: e.target.checked
+                                  ? prev.frecuencia_recurrencia || "semanal"
+                                  : "",
+                                dias_semana: e.target.checked
+                                  ? prev.dias_semana || []
+                                  : [],
+                              }))
+                            }
+                          />
+                        }
+                        label="La solicitud es recurrente"
+                      />
+
+                      {form.es_recurrente && (
+                        <>
+                          <TextField
+                            select
+                            fullWidth
+                            size="small"
+                            label="Frecuencia de recurrencia"
+                            value={form.frecuencia_recurrencia}
+                            onChange={handleChange("frecuencia_recurrencia")}
+                            sx={{ mt: 1, mb: 2 }}
+                          >
+                            <MenuItem value="diaria">Diaria</MenuItem>
+                            <MenuItem value="semanal">Semanal</MenuItem>
+                            <MenuItem value="mensual">Mensual</MenuItem>
+                          </TextField>
+
+                          {form.frecuencia_recurrencia === "semanal" && (
+                            <Box>
+                              <Typography sx={{ mb: 1, fontWeight: 600 }}>
+                                Días de la semana
+                              </Typography>
+
+                              <Box sx={{ display: "flex", flexWrap: "wrap", gap: 1 }}>
+                                {[
+                                  { id: 1, nombre: "Lunes" },
+                                  { id: 2, nombre: "Martes" },
+                                  { id: 3, nombre: "Miércoles" },
+                                  { id: 4, nombre: "Jueves" },
+                                  { id: 5, nombre: "Viernes" },
+                                  { id: 6, nombre: "Sábado" },
+                                  { id: 7, nombre: "Domingo" },
+                                ].map((dia) => (
+                                  <FormControlLabel
+                                    key={dia.id}
+                                    control={
+                                      <Checkbox
+                                        size="small"
+                                        checked={(form.dias_semana || []).includes(dia.id)}
+                                        onChange={(e) => {
+                                          setForm((prev: any) => ({
+                                            ...prev,
+                                            dias_semana: e.target.checked
+                                              ? [...(prev.dias_semana || []), dia.id].sort(
+                                                (a, b) => a - b
+                                              )
+                                              : (prev.dias_semana || []).filter(
+                                                (d: number) => d !== dia.id
+                                              ),
+                                          }));
+                                        }}
+                                      />
+                                    }
+                                    label={dia.nombre}
+                                  />
+                                ))}
+                              </Box>
+                            </Box>
+                          )}
+                        </>
+                      )}
+                    </Box>
+                  )}
                 </Box>
               ) : (
                 <Box
@@ -896,7 +1148,7 @@ export default function DetalleSolicitud() {
                     label="Fecha"
                     valor={
                       obtenerFechaInput(solicitud.fecha_inicio) ===
-                      obtenerFechaInput(solicitud.fecha_fin)
+                        obtenerFechaInput(solicitud.fecha_fin)
                         ? formatearFecha(solicitud.fecha_inicio)
                         : `${formatearFecha(solicitud.fecha_inicio)} → ${formatearFecha(solicitud.fecha_fin)}`
                     }
@@ -913,6 +1165,98 @@ export default function DetalleSolicitud() {
                       solicitud.es_recurrente ? "Sí" : "No"
                     }
                   />
+                </Box>
+              )}
+              {(modoEdicion ? form.es_recurrente : solicitud.es_recurrente) && (
+                <Box
+                  sx={{
+                    mt: 3,
+                    p: 2,
+                    borderRadius: "10px",
+                    backgroundColor: "#F8FAFC",
+                    border: "1px solid #E2E8F0",
+                  }}
+                >
+                  <Typography sx={{ fontWeight: 700, mb: 1 }}>
+                    Fechas de las recurrencias
+                  </Typography>
+
+                  <Typography
+                    sx={{
+                      fontSize: "0.85rem",
+                      color: "#64748B",
+                      mb: 2,
+                    }}
+                  >
+                    Estas son las fechas generadas entre la fecha inicial y la final.
+                  </Typography>
+
+                  {(() => {
+                    const fechas = modoEdicion
+                      ? generarFechasRecurrencia(
+                        form.fecha_inicio,
+                        form.fecha_fin,
+                        form.frecuencia_recurrencia,
+                        (form.dias_semana || []).map(Number)
+                      )
+                      : (solicitud.ocurrencias || []).map(
+                        (o: any) => obtenerFechaInput(o.fecha_inicio)
+                      );
+
+                    return (
+                      <>
+                        <Chip
+                          label={`${fechas.length} ocurrencias`}
+                          size="small"
+                          color="primary"
+                          sx={{ mb: 2 }}
+                        />
+
+                        <Box
+                          sx={{
+                            display: "grid",
+                            gridTemplateColumns: {
+                              xs: "1fr",
+                              sm: "1fr 1fr",
+                              md: "1fr 1fr 1fr",
+                            },
+                            gap: 1,
+                          }}
+                        >
+                          {fechas.map((fecha: string, index: number) => (
+                            <Box
+                              key={`${fecha}-${index}`}
+                              sx={{
+                                p: 1.2,
+                                backgroundColor: "#FFFFFF",
+                                border: "1px solid #E2E8F0",
+                                borderRadius: "8px",
+                                display: "flex",
+                                alignItems: "center",
+                                gap: 1,
+                              }}
+                            >
+                              <Chip
+                                label={index + 1}
+                                size="small"
+                                sx={{ fontWeight: 600 }}
+                              />
+
+                              <Typography sx={{ fontSize: "0.9rem" }}>
+                                {formatearFecha(fecha)}
+                              </Typography>
+                            </Box>
+                          ))}
+                        </Box>
+
+                        {fechas.length === 0 && (
+                          <Alert severity="info">
+                            Selecciona las fechas y la frecuencia para visualizar las ocurrencias.
+                          </Alert>
+                        )}
+                      </>
+                    );
+                  })()}
                 </Box>
               )}
             </Paper>
@@ -1681,7 +2025,7 @@ export default function DetalleSolicitud() {
               label="Fecha"
               valor={
                 obtenerFechaInput(solicitud?.fecha_inicio) ===
-                obtenerFechaInput(solicitud?.fecha_fin)
+                  obtenerFechaInput(solicitud?.fecha_fin)
                   ? formatearFecha(solicitud?.fecha_inicio)
                   : `${formatearFecha(solicitud?.fecha_inicio)} → ${formatearFecha(solicitud?.fecha_fin)}`
               }

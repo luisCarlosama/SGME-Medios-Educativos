@@ -18,20 +18,29 @@ const transporter = nodemailer.createTransport({
 /**
  * Envía un correo o lo simula según EMAIL_SIMULATE
  */
+
 export async function enviarCorreo({ para, asunto, html }) {
-  // ===== MODO SIMULACIÓN =====
   if (SIMULAR) {
-    console.log('========================================');
-    console.log('📧 SIMULACIÓN DE CORREO (no se envió realmente)');
-    console.log('Para:     ', para);
-    console.log('Asunto:   ', asunto);
-    console.log('Contenido:', html?.substring(0, 120) + '...');
-    console.log('========================================');
+    console.log("========================================");
+    console.log("📧 SIMULACIÓN DE CORREO");
+    console.log("Para:", para);
+    console.log("Asunto:", asunto);
+    console.log("========================================");
+
     return { ok: true, simulado: true };
   }
 
-  // ===== ENVÍO REAL =====
   try {
+    // Verificar configuración antes del envío
+    if (
+      !process.env.EMAIL_HOST ||
+      !process.env.EMAIL_USER ||
+      !process.env.EMAIL_PASS ||
+      !process.env.EMAIL_FROM
+    ) {
+      throw new Error("Faltan variables de configuración SMTP en el archivo .env");
+    }
+
     const info = await transporter.sendMail({
       from: process.env.EMAIL_FROM,
       to: para,
@@ -39,11 +48,30 @@ export async function enviarCorreo({ para, asunto, html }) {
       html,
     });
 
-    console.log('✅ Correo enviado:', info.messageId);
-    return { ok: true, simulado: false, messageId: info.messageId };
+    console.log("✅ Correo enviado:", info.messageId);
+
+    return {
+      ok: true,
+      simulado: false,
+      messageId: info.messageId,
+    };
+
   } catch (error) {
-    console.error('❌ Error al enviar correo:', error.message);
-    return { ok: false, error: error.message };
+    console.error("========================================");
+    console.error("❌ ERROR COMPLETO AL ENVIAR CORREO");
+    console.error("Error:", error);
+    console.error("Nombre:", error?.name);
+    console.error("Código:", error?.code);
+    console.error("Comando:", error?.command);
+    console.error("Mensaje:", error?.message);
+    console.error("Respuesta SMTP:", error?.response);
+    console.error("========================================");
+
+    return {
+      ok: false,
+      error: error?.message || String(error),
+      codigo: error?.code || null,
+    };
   }
 }
 
