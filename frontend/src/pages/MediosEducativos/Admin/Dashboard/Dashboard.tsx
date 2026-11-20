@@ -77,236 +77,232 @@ export default function Dashboard() {
   const [modalExportar, setModalExportar] = useState(false);
 
   const handleExportar = async (
-  tipo: "externas" | "internas" | "todas",
-  formato: "xlsx" | "pdf"
-) => {
-  try {
-    // 1. Partimos de las recientes del Dashboard
-    let lista = data?.solicitudesRecientes ?? [];
+    tipo: "externas" | "internas" | "todas",
+    formato: "xlsx" | "pdf"
+  ) => {
+    try {
+      // 1. Partimos de las recientes del Dashboard
+      let lista = data?.solicitudesRecientes ?? [];
 
-    // 2. Excluir Rechazada y Cancelada
-    lista = lista.filter(
-      (s) => s.estado !== "Rechazada" && s.estado !== "Cancelada"
-    );
-
-    // 3. Filtrar por tipo
-    if (tipo === "externas") {
+      // 2. Excluir Rechazada y Cancelada
       lista = lista.filter(
-        (s) =>
-          s.tipoSolicitud?.toLowerCase() === "externa" ||
-          s.tipo === "externo"
+        (s) => s.estado !== "Rechazada" && s.estado !== "Cancelada"
       );
-    }
-    if (tipo === "internas") {
-      lista = lista.filter(
-        (s) =>
-          s.tipoSolicitud?.toLowerCase() === "institucional" ||
-          s.tipoSolicitud?.toLowerCase() === "interna" ||
-          s.tipo === "interno"
-      );
-    }
 
-    // 4. Máximo 15 recientes
-    lista = lista.slice(0, 15);
+      // 3. Filtrar por tipo
+      if (tipo === "externas") {
+        lista = lista.filter(
+          (s) => s.tipoSolicitud?.toLowerCase() === "externa"
+        );
+      }
 
-    const kpis = {
-      pendientes: data?.stats?.solicitudesPendientes ?? 0,
-      externas: data?.stats?.solicitudesExternas ?? 0,
-      internas: data?.stats?.solicitudesInternas ?? 0,
-      hoy: data?.stats?.reservasHoy ?? 0,
-    };
+      if (tipo === "internas") {
+        lista = lista.filter(
+          (s) => s.tipoSolicitud?.toLowerCase() === "interna"
+        );
+      }
 
-    const fechaGeneracion = new Date().toLocaleString("es-CO", {
-      dateStyle: "long",
-      timeStyle: "short",
-    });
+      // 4. Máximo 15 recientes
+      lista = lista.slice(0, 15);
 
-    const tipoTexto =
-      tipo === "externas"
-        ? "Externas"
-        : tipo === "internas"
-          ? "Internas"
-          : "Todas";
+      const kpis = {
+        pendientes: data?.stats?.solicitudesPendientes ?? 0,
+        externas: data?.stats?.solicitudesExternas ?? 0,
+        internas: data?.stats?.solicitudesInternas ?? 0,
+        hoy: data?.stats?.reservasHoy ?? 0,
+      };
 
-    // ========== EXCEL ==========
-    if (formato === "xlsx") {
-      const workbook = XLSX.utils.book_new();
+      const fechaGeneracion = new Date().toLocaleString("es-CO", {
+        dateStyle: "long",
+        timeStyle: "short",
+      });
 
-      const portada = [
-        ["SGME - MEDIOS EDUCATIVOS"],
-        ["Universidad CESMAG"],
-        [""],
-        ["REPORTE DE SOLICITUDES RECIENTES"],
-        [""],
-        ["Tipo de reporte:", tipoTexto],
-        ["Fecha de generación:", fechaGeneracion],
-        [""],
-        ["RESUMEN ESTADÍSTICO"],
-        ["Solicitudes pendientes", kpis.pendientes],
-        ["Solicitudes externas", kpis.externas],
-        ["Solicitudes internas", kpis.internas],
-        ["Reservas confirmadas hoy", kpis.hoy],
-      ];
+      const tipoTexto =
+        tipo === "externas"
+          ? "Externas"
+          : tipo === "internas"
+            ? "Internas"
+            : "Todas";
 
-      const hojaPortada = XLSX.utils.aoa_to_sheet(portada);
-      hojaPortada["!cols"] = [{ wch: 35 }, { wch: 25 }];
-      XLSX.utils.book_append_sheet(workbook, hojaPortada, "Resumen");
+      // ========== EXCEL ==========
+      if (formato === "xlsx") {
+        const workbook = XLSX.utils.book_new();
 
-      if (lista.length > 0) {
-        const filas = lista.map((s: any, index: number) => ({
-          "N°": index + 1,
-          Código: s.codigo,
-          Solicitante: s.solicitante,
-          Tipo:
+        const portada = [
+          ["SGME - MEDIOS EDUCATIVOS"],
+          ["Universidad CESMAG"],
+          [""],
+          ["REPORTE DE SOLICITUDES RECIENTES"],
+          [""],
+          ["Tipo de reporte:", tipoTexto],
+          ["Fecha de generación:", fechaGeneracion],
+          [""],
+          ["RESUMEN ESTADÍSTICO"],
+          ["Solicitudes pendientes", kpis.pendientes],
+          ["Solicitudes externas", kpis.externas],
+          ["Solicitudes internas", kpis.internas],
+          ["Reservas confirmadas hoy", kpis.hoy],
+        ];
+
+        const hojaPortada = XLSX.utils.aoa_to_sheet(portada);
+        hojaPortada["!cols"] = [{ wch: 35 }, { wch: 25 }];
+        XLSX.utils.book_append_sheet(workbook, hojaPortada, "Resumen");
+
+        if (lista.length > 0) {
+          const filas = lista.map((s: any, index: number) => ({
+            "N°": index + 1,
+            Código: s.codigo,
+            Solicitante: s.solicitante,
+            Tipo:
+              s.tipoSolicitud ??
+              (s.tipo === "interno" ? "Institucional" : "Externa"),
+            Espacio: s.espacio,
+            Campus: s.campus ?? "",
+            "Fecha de la reserva": s.fecha
+              ? String(s.fecha).split("T")[0].split("-").reverse().join("/")
+              : "",
+            "Hora inicio": s.hora_inicio
+              ? String(s.hora_inicio).slice(0, 5)
+              : "",
+            "Hora fin": s.hora_fin ? String(s.hora_fin).slice(0, 5) : "",
+            Horario:
+              s.hora_inicio && s.hora_fin
+                ? `${String(s.hora_inicio).slice(0, 5)} - ${String(s.hora_fin).slice(0, 5)}`
+                : "",
+            Estado: s.estado,
+          }));
+
+          const hojaDetalle = XLSX.utils.json_to_sheet(filas);
+          hojaDetalle["!cols"] = [
+            { wch: 5 },
+            { wch: 22 },
+            { wch: 25 },
+            { wch: 14 },
+            { wch: 25 },
+            { wch: 16 },
+            { wch: 16 },
+            { wch: 12 },
+            { wch: 12 },
+            { wch: 16 },
+            { wch: 12 },
+          ];
+          XLSX.utils.book_append_sheet(workbook, hojaDetalle, "Solicitudes");
+        }
+
+        XLSX.writeFile(
+          workbook,
+          `SGME_Recientes_${tipoTexto}_${new Date().toISOString().slice(0, 10)}.xlsx`
+        );
+      }
+
+      // ========== PDF ==========
+      if (formato === "pdf") {
+        const doc = new jsPDF();
+        const pageWidth = doc.internal.pageSize.getWidth();
+
+        doc.setFillColor(30, 58, 95);
+        doc.rect(0, 0, pageWidth, 28, "F");
+
+        doc.setTextColor(255, 255, 255);
+        doc.setFontSize(16);
+        doc.setFont("helvetica", "bold");
+        doc.text("SGME - MEDIOS EDUCATIVOS", 14, 12);
+
+        doc.setFontSize(10);
+        doc.setFont("helvetica", "normal");
+        doc.text("Universidad CESMAG", 14, 19);
+
+        doc.setFontSize(9);
+        doc.text("Reporte de Solicitudes Recientes", pageWidth - 14, 12, {
+          align: "right",
+        });
+        doc.text(fechaGeneracion, pageWidth - 14, 19, { align: "right" });
+
+        doc.setTextColor(15, 23, 42);
+        doc.setFontSize(13);
+        doc.setFont("helvetica", "bold");
+        doc.text(`Tipo de solicitudes: ${tipoTexto}`, 14, 40);
+
+        doc.setFontSize(11);
+        doc.text("Resumen estadístico", 14, 52);
+
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(10);
+        doc.text(`• Solicitudes pendientes: ${kpis.pendientes}`, 18, 60);
+        doc.text(`• Solicitudes externas: ${kpis.externas}`, 18, 66);
+        doc.text(`• Solicitudes internas: ${kpis.internas}`, 18, 72);
+        doc.text(`• Reservas confirmadas hoy: ${kpis.hoy}`, 18, 78);
+
+        if (lista.length > 0) {
+          const filas = lista.map((s: any) => [
+            s.codigo,
+            s.solicitante,
             s.tipoSolicitud ??
             (s.tipo === "interno" ? "Institucional" : "Externa"),
-          Espacio: s.espacio,
-          Campus: s.campus ?? "",
-          "Fecha de la reserva": s.fecha
-            ? String(s.fecha).split("T")[0].split("-").reverse().join("/")
-            : "",
-          "Hora inicio": s.hora_inicio
-            ? String(s.hora_inicio).slice(0, 5)
-            : "",
-          "Hora fin": s.hora_fin ? String(s.hora_fin).slice(0, 5) : "",
-          Horario:
+            s.espacio,
+            s.fecha
+              ? String(s.fecha).split("T")[0].split("-").reverse().join("/")
+              : "",
             s.hora_inicio && s.hora_fin
               ? `${String(s.hora_inicio).slice(0, 5)} - ${String(s.hora_fin).slice(0, 5)}`
               : "",
-          Estado: s.estado,
-        }));
+            s.estado,
+          ]);
 
-        const hojaDetalle = XLSX.utils.json_to_sheet(filas);
-        hojaDetalle["!cols"] = [
-          { wch: 5 },
-          { wch: 22 },
-          { wch: 25 },
-          { wch: 14 },
-          { wch: 25 },
-          { wch: 16 },
-          { wch: 16 },
-          { wch: 12 },
-          { wch: 12 },
-          { wch: 16 },
-          { wch: 12 },
-        ];
-        XLSX.utils.book_append_sheet(workbook, hojaDetalle, "Solicitudes");
-      }
-
-      XLSX.writeFile(
-        workbook,
-        `SGME_Recientes_${tipoTexto}_${new Date().toISOString().slice(0, 10)}.xlsx`
-      );
-    }
-
-    // ========== PDF ==========
-    if (formato === "pdf") {
-      const doc = new jsPDF();
-      const pageWidth = doc.internal.pageSize.getWidth();
-
-      doc.setFillColor(30, 58, 95);
-      doc.rect(0, 0, pageWidth, 28, "F");
-
-      doc.setTextColor(255, 255, 255);
-      doc.setFontSize(16);
-      doc.setFont("helvetica", "bold");
-      doc.text("SGME - MEDIOS EDUCATIVOS", 14, 12);
-
-      doc.setFontSize(10);
-      doc.setFont("helvetica", "normal");
-      doc.text("Universidad CESMAG", 14, 19);
-
-      doc.setFontSize(9);
-      doc.text("Reporte de Solicitudes Recientes", pageWidth - 14, 12, {
-        align: "right",
-      });
-      doc.text(fechaGeneracion, pageWidth - 14, 19, { align: "right" });
-
-      doc.setTextColor(15, 23, 42);
-      doc.setFontSize(13);
-      doc.setFont("helvetica", "bold");
-      doc.text(`Tipo de solicitudes: ${tipoTexto}`, 14, 40);
-
-      doc.setFontSize(11);
-      doc.text("Resumen estadístico", 14, 52);
-
-      doc.setFont("helvetica", "normal");
-      doc.setFontSize(10);
-      doc.text(`• Solicitudes pendientes: ${kpis.pendientes}`, 18, 60);
-      doc.text(`• Solicitudes externas: ${kpis.externas}`, 18, 66);
-      doc.text(`• Solicitudes internas: ${kpis.internas}`, 18, 72);
-      doc.text(`• Reservas confirmadas hoy: ${kpis.hoy}`, 18, 78);
-
-      if (lista.length > 0) {
-        const filas = lista.map((s: any) => [
-          s.codigo,
-          s.solicitante,
-          s.tipoSolicitud ??
-            (s.tipo === "interno" ? "Institucional" : "Externa"),
-          s.espacio,
-          s.fecha
-            ? String(s.fecha).split("T")[0].split("-").reverse().join("/")
-            : "",
-          s.hora_inicio && s.hora_fin
-            ? `${String(s.hora_inicio).slice(0, 5)} - ${String(s.hora_fin).slice(0, 5)}`
-            : "",
-          s.estado,
-        ]);
-
-        autoTable(doc, {
-          startY: 88,
-          head: [
-            [
-              "Código",
-              "Solicitante",
-              "Tipo",
-              "Espacio",
-              "Fecha reserva",
-              "Horario",
-              "Estado",
+          autoTable(doc, {
+            startY: 88,
+            head: [
+              [
+                "Código",
+                "Solicitante",
+                "Tipo",
+                "Espacio",
+                "Fecha reserva",
+                "Horario",
+                "Estado",
+              ],
             ],
-          ],
-          body: filas,
-          styles: { fontSize: 7.5, cellPadding: 2.5 },
-          headStyles: {
-            fillColor: [30, 58, 95],
-            textColor: 255,
-            fontStyle: "bold",
-          },
-          alternateRowStyles: { fillColor: [248, 250, 252] },
-          margin: { left: 10, right: 10 },
-        });
-      } else {
-        doc.setFontSize(10);
-        doc.text(
-          "No se encontraron solicitudes recientes con los filtros seleccionados.",
-          14,
-          90
+            body: filas,
+            styles: { fontSize: 7.5, cellPadding: 2.5 },
+            headStyles: {
+              fillColor: [30, 58, 95],
+              textColor: 255,
+              fontStyle: "bold",
+            },
+            alternateRowStyles: { fillColor: [248, 250, 252] },
+            margin: { left: 10, right: 10 },
+          });
+        } else {
+          doc.setFontSize(10);
+          doc.text(
+            "No se encontraron solicitudes recientes con los filtros seleccionados.",
+            14,
+            90
+          );
+        }
+
+        const pageCount = doc.getNumberOfPages();
+        for (let i = 1; i <= pageCount; i++) {
+          doc.setPage(i);
+          doc.setFontSize(8);
+          doc.setTextColor(150);
+          doc.text(
+            `SGME - Medios Educativos | Página ${i} de ${pageCount}`,
+            pageWidth / 2,
+            doc.internal.pageSize.getHeight() - 10,
+            { align: "center" }
+          );
+        }
+
+        doc.save(
+          `SGME_Recientes_${tipoTexto}_${new Date().toISOString().slice(0, 10)}.pdf`
         );
       }
-
-      const pageCount = doc.getNumberOfPages();
-      for (let i = 1; i <= pageCount; i++) {
-        doc.setPage(i);
-        doc.setFontSize(8);
-        doc.setTextColor(150);
-        doc.text(
-          `SGME - Medios Educativos | Página ${i} de ${pageCount}`,
-          pageWidth / 2,
-          doc.internal.pageSize.getHeight() - 10,
-          { align: "center" }
-        );
-      }
-
-      doc.save(
-        `SGME_Recientes_${tipoTexto}_${new Date().toISOString().slice(0, 10)}.pdf`
-      );
+    } catch (error) {
+      console.error(error);
+      alert("Error al exportar las solicitudes recientes.");
     }
-  } catch (error) {
-    console.error(error);
-    alert("Error al exportar las solicitudes recientes.");
-  }
-};
+  };
 
   useEffect(() => {
     getDashboard()
